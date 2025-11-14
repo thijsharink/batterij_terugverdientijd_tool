@@ -11,6 +11,7 @@ import pandas as pd
 import pvlib
 
 from config_loader import ConfigLoader
+from epex_data import EpexProjector
 
 
 @dataclass
@@ -75,6 +76,11 @@ class BatterySimulator:
         
         # Pre-calculate consumption profile for a year
         self.consumption_profile_kw = self._create_consumption_profile()
+
+        # EPEX projector for dynamic tariffs
+        self.epex_projector = None
+        if self.config.tariff.tariff_type == 'dynamic':
+            self.epex_projector = EpexProjector()
     
     def _create_consumption_profile(self) -> np.ndarray:
         """
@@ -242,8 +248,8 @@ class BatterySimulator:
         grid_export_kw = max(0, net_after_battery)
         
         # Calculate tariffs
-        consumption_tariff = self._get_consumption_tariff(hour_of_day, year_num)
-        export_tariff = self._get_export_tariff(hour_of_day, year_num)
+        consumption_tariff = self._get_consumption_tariff(timestamp, year_num)
+        export_tariff = self._get_export_tariff(timestamp, year_num)
         
         # Calculate battery flow cost
         battery_flow_cost = self._calculate_battery_flow_cost(
@@ -299,40 +305,75 @@ class BatterySimulator:
         retention = (1 - cycle_fade_fraction) * (1 - calendar_fade_fraction)
         return max(0.0, self.initial_battery_capacity_kwh * retention)
 
-    def _get_consumption_tariff(self, hour: int, year_num: int) -> float:
+    def _get_consumption_tariff(self, timestamp: datetime, year_num: int) -> float:
         """
         Get tariff for consuming from grid (€/kWh)
         Positive value = we pay this
         """
-        # Base rates
-        if self.config.tariff.day_start_hour <= hour < self.config.tariff.day_end_hour:
-            base_rate = self.config.tariff.day_rate
-            rate_increase = self.config.tariff.day_rate_increase
-        else:
-            base_rate = self.config.tariff.night_rate
-            rate_increase = self.config.tariff.night_rate_increase
-        
-        # Apply yearly increases
-        rate = base_rate * (1 + rate_increase / 100) ** (year_num - 1)
+        # Common components
         transport = self.config.tariff.transport_rate * (1 + self.config.tariff.transport_rate_increase / 100) ** (year_num - 1)
         tax = self.config.tariff.energy_tax * (1 + self.config.tariff.energy_tax_increase / 100) ** (year_num - 1)
+
+        if self.config.tariff.tariff_type == 'static':
+            # Base rates for static
+            if self.config.tariff.static.day_start_hour <= timestamp.hour < self.config.tariff.static.day_end_hour:
+                base_rate = self.config.tariff.static.day_rate
+                rate_increase = self.config.tariff.static.day_rate_increase
+            else:
+                base_rate = self.config.tariff.static.night_rate
+                rate_increase = self.config.tariff.static.night_rate_increase
+            
+            # Apply yearly increases
+            rate = base_rate * (1 + rate_increase / 100) ** (year_num - 1)
+            return rate + transport + tax
         
-        return rate + transport + tax
-    
-    def _get_export_tariff(self, hour: int, year_num: int) -> float:
+        elif self.config.tariff.tariff_type == 'dynamic':
+            # Get projected EPEX price
+            base_epex_price = self.epex_projector.get_epex_price(timestamp)
+            
+            # Apply yearly increase
+            epex_increase = self.config.tariff.dynamic.epex_price_increase_percent
+            epex_price = base_epex_price * (1 + epex_increase / 100) ** (year_num - 1)
+            
+            # Total consumption cost
+            trader_fee = self.config.tariff.dynamic.trader_fee
+            return epex_price + trader_fee + transport + tax
+        
+        else:
+            raise NotImplementedError(f"Tariff type '{self.config.tariff.tariff_type}' not implemented.")
+
+    def _get_export_tariff(self, timestamp: datetime, year_num: int) -> float:
         """
         Get tariff for exporting to grid (€/kWh)
         NEGATIVE value = we receive this
         """
-        # Base rate for feedback
-        base_rate = self.config.tariff.feed_back_rate
-        rate_increase = self.config.tariff.feed_back_rate_increase_percent
-        
-        # Apply yearly increases
-        rate = base_rate * (1 + rate_increase / 100) ** (year_num - 1)
-
-        # The tariff is what we receive, so it's a negative cost.
-        return -rate
+        if self.config.tariff.tariff_type == 'static':
+            # Base rate for feedback
+            base_rate = self.config.tariff.static.feed_back_rate
+            rate_increase = self.config.tariff.static.feed_back_rate_increase_percent
+            
+            # Apply yearly increases
+            rate = base_rate * (1 + rate_increase / 100) ** (year_num - 1)
+            return -rate
+            
+        elif self.config.tariff.tariff_type == 'dynamic':
+            # Get projected EPEX price
+            base_epex_price = self.epex_projector.get_epex_price(timestamp)
+            
+            # Apply yearly increase
+            epex_increase = self.config.tariff.dynamic.epex_price_increase_percent
+            epex_price = base_epex_price * (1 + epex_increase / 100) ** (year_num - 1)
+            
+            # Total export revenue
+            trader_fee = self.config.tariff.dynamic.trader_fee
+            feed_in_fee = self.config.tariff.dynamic.feed_in_fee
+            
+            # Revenue is what's left after fees. Return as negative for "revenue".
+            revenue = epex_price - trader_fee - feed_in_fee
+            return -revenue
+            
+        else:
+            raise NotImplementedError(f"Tariff type '{self.config.tariff.tariff_type}' not implemented.")
     
     def _calculate_battery_flow_cost(
         self,

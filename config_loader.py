@@ -11,25 +11,38 @@ import numpy as np
 
 
 @dataclass
+class StaticTariffConfig:
+    """Static energy tariff configuration"""
+    day_rate: float
+    night_rate: float
+    feed_back_rate: float
+    day_start_hour: int
+    day_end_hour: int
+    day_rate_increase: float
+    night_rate_increase: float
+    feed_back_rate_increase_percent: float
+
+@dataclass
+class DynamicTariffConfig:
+    """Dynamic energy tariff configuration"""
+    trader_fee: float
+    feed_in_fee: float
+    epex_price_increase_percent: float
+
+@dataclass
 class TariffConfig:
     """Energy tariff configuration"""
     tariff_type: str  # 'static' or 'dynamic'
     
-    # Static tariff parameters
-    day_rate: float  # €/kWh
-    night_rate: float  # €/kWh
+    # Common parameters
     transport_rate: float  # €/kWh
     energy_tax: float  # €/kWh
-    feed_back_rate: float # €/kWh
-    day_start_hour: int  # Start hour of day rate (0-23)
-    day_end_hour: int  # End hour of day rate (0-23)
-    
-    # Price increase modeling
-    day_rate_increase: float  # % per year
-    night_rate_increase: float  # % per year
     transport_rate_increase: float  # % per year
     energy_tax_increase: float  # % per year
-    feed_back_rate_increase_percent: float # % per year
+    
+    # Specific tariff configs
+    static: Optional[StaticTariffConfig] = None
+    dynamic: Optional[DynamicTariffConfig] = None
 
 
 @dataclass
@@ -89,20 +102,43 @@ class ConfigLoader:
     
     def _load_tariff(self) -> TariffConfig:
         """Load tariff configuration"""
+        tariff_type = self._get_str('Tariff', 'type', 'static')
+        
+        static_config = None
+        dynamic_config = None
+        
+        if tariff_type == 'static':
+            static_config = StaticTariffConfig(
+                day_rate=self._get_float('Tariff', 'day_rate'),
+                night_rate=self._get_float('Tariff', 'night_rate'),
+                feed_back_rate=self._get_float('Tariff', 'feed_back_rate'),
+                day_start_hour=self._get_int('Tariff', 'day_start_hour'),
+                day_end_hour=self._get_int('Tariff', 'day_end_hour'),
+                day_rate_increase=self._get_float('Tariff', 'day_rate_increase_percent'),
+                night_rate_increase=self._get_float('Tariff', 'night_rate_increase_percent'),
+                feed_back_rate_increase_percent=self._get_float('Tariff', 'feed_back_rate_increase_percent'),
+            )
+        elif tariff_type == 'dynamic':
+            # Check if section exists
+            if not self.parser.has_section('DynamicTariff'):
+                raise ValueError("Config Error: Tariff type is 'dynamic' but [DynamicTariff] section is missing.")
+            
+            dynamic_config = DynamicTariffConfig(
+                trader_fee=self._get_float('DynamicTariff', 'trader_fee'),
+                feed_in_fee=self._get_float('DynamicTariff', 'feed_in_fee'),
+                epex_price_increase_percent=self._get_float('DynamicTariff', 'epex_price_increase_percent'),
+            )
+        else:
+            raise ValueError(f"Invalid tariff type: {tariff_type}. Must be 'static' or 'dynamic'.")
+
         return TariffConfig(
-            tariff_type=self._get_str('Tariff', 'type', 'static'),
-            day_rate=self._get_float('Tariff', 'day_rate'),
-            night_rate=self._get_float('Tariff', 'night_rate'),
+            tariff_type=tariff_type,
             transport_rate=self._get_float('Tariff', 'transport_rate'),
             energy_tax=self._get_float('Tariff', 'energy_tax'),
-            feed_back_rate=self._get_float('Tariff', 'feed_back_rate'),
-            day_start_hour=self._get_int('Tariff', 'day_start_hour'),
-            day_end_hour=self._get_int('Tariff', 'day_end_hour'),
-            day_rate_increase=self._get_float('Tariff', 'day_rate_increase_percent'),
-            night_rate_increase=self._get_float('Tariff', 'night_rate_increase_percent'),
             transport_rate_increase=self._get_float('Tariff', 'transport_rate_increase_percent'),
             energy_tax_increase=self.parser.getfloat('Tariff', 'energy_tax_increase_percent'),
-            feed_back_rate_increase_percent=self._get_float('Tariff', 'feed_back_rate_increase_percent'),
+            static=static_config,
+            dynamic=dynamic_config
         )
     
     def _load_consumption(self) -> ConsumptionConfig:
@@ -133,9 +169,10 @@ class ConfigLoader:
     def _validate(self):
         """Validate configuration values"""
         assert self.simulation_years > 0, "Simulation years must be positive"
-        assert self.tariff.day_start_hour < self.tariff.day_end_hour, "Day start must be before day end"
-        assert 0 <= self.tariff.day_start_hour <= 23, "Day start hour must be 0-23"
-        assert 0 <= self.tariff.day_end_hour <= 23, "Day end hour must be 0-23"
+        if self.tariff.tariff_type == 'static':
+            assert self.tariff.static.day_start_hour < self.tariff.static.day_end_hour, "Day start must be before day end"
+            assert 0 <= self.tariff.static.day_start_hour <= 23, "Day start hour must be 0-23"
+            assert 0 <= self.tariff.static.day_end_hour <= 23, "Day end hour must be 0-23"
         assert self.consumption.yearly_energy_usage_kwh > 0, "Yearly energy usage must be positive"
         assert self.solar.yearly_generation_kwh > 0, "Solar generation must be positive"
         assert self.battery.capacity_kwh > 0, "Battery capacity must be positive"
@@ -145,8 +182,14 @@ class ConfigLoader:
         """Print configuration summary"""
         print(f"\nSimulation Period: {self.simulation_years} years")
         print(f"\n[Tariff - {self.tariff.tariff_type.upper()}]")
-        print(f"  Day rate: €{self.tariff.day_rate:.4f}/kWh ({self.tariff.day_start_hour}:00-{self.tariff.day_end_hour}:00)")
-        print(f"  Night rate: €{self.tariff.night_rate:.4f}/kWh")
+        if self.tariff.tariff_type == 'static':
+            print(f"  Day rate: €{self.tariff.static.day_rate:.4f}/kWh ({self.tariff.static.day_start_hour}:00-{self.tariff.static.day_end_hour}:00)")
+            print(f"  Night rate: €{self.tariff.static.night_rate:.4f}/kWh")
+        else:
+            print(f"  Trader fee: €{self.tariff.dynamic.trader_fee:.4f}/kWh")
+            print(f"  Feed-in fee: €{self.tariff.dynamic.feed_in_fee:.4f}/kWh (additional)")
+            print(f"  EPEX price increase: {self.tariff.dynamic.epex_price_increase_percent:.2f}% per year")
+        
         print(f"  Transport: €{self.tariff.transport_rate:.4f}/kWh")
         print(f"  Energy tax: €{self.tariff.energy_tax:.4f}/kWh")
         
