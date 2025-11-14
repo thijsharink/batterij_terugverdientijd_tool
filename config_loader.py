@@ -41,7 +41,6 @@ class SolarConfig:
     """Solar PV configuration"""
     yearly_generation_kwh: float  # Total kWh per year
     degradation_rate: float  # % per year
-    profile_csv: Optional[str] = None  # Path to hourly profile CSV
 
 
 @dataclass
@@ -52,6 +51,7 @@ class BatteryConfig:
     discharge_loss: float  # % loss when discharging
     degradation_rate: float  # % per year
     investment_euros: float  # Total investment cost
+    max_power_kw: float  # Max charge/discharge power in kW
 
 
 class ConfigLoader:
@@ -68,9 +68,6 @@ class ConfigLoader:
         self.consumption = self._load_consumption()
         self.solar = self._load_solar()
         self.battery = self._load_battery()
-        
-        # Cache for solar profile
-        self._solar_profile_hourly = None
         
         # Validate
         self._validate()
@@ -100,7 +97,7 @@ class ConfigLoader:
             day_rate_increase=self._get_float('Tariff', 'day_rate_increase_percent'),
             night_rate_increase=self._get_float('Tariff', 'night_rate_increase_percent'),
             transport_rate_increase=self._get_float('Tariff', 'transport_rate_increase_percent'),
-            energy_tax_increase=self._get_float('Tariff', 'energy_tax_increase_percent'),
+            energy_tax_increase=self.parser.getfloat('Tariff', 'energy_tax_increase_percent'),
         )
     
     def _load_consumption(self) -> ConsumptionConfig:
@@ -113,8 +110,7 @@ class ConfigLoader:
         """Load solar configuration"""
         return SolarConfig(
             yearly_generation_kwh=self._get_float('Solar', 'yearly_generation_kwh'),
-            degradation_rate=self._get_float('Solar', 'degradation_rate_percent'),
-            profile_csv=self._get_str('Solar', 'profile_csv', fallback=None)
+            degradation_rate=self._get_float('Solar', 'degradation_rate_percent')
         )
     
     def _load_battery(self) -> BatteryConfig:
@@ -124,7 +120,8 @@ class ConfigLoader:
             charge_loss=self._get_float('Battery', 'charge_loss_percent'),
             discharge_loss=self._get_float('Battery', 'discharge_loss_percent'),
             degradation_rate=self._get_float('Battery', 'degradation_rate_percent'),
-            investment_euros=self._get_float('Battery', 'investment_euros')
+            investment_euros=self._get_float('Battery', 'investment_euros'),
+            max_power_kw=self._get_float('Battery', 'max_power_kw')
         )
     
     def _validate(self):
@@ -137,32 +134,6 @@ class ConfigLoader:
         assert self.solar.yearly_generation_kwh > 0, "Solar generation must be positive"
         assert self.battery.capacity_kwh > 0, "Battery capacity must be positive"
         assert self.battery.investment_euros > 0, "Investment must be positive"
-    
-    def get_solar_profile_hourly(self) -> np.ndarray:
-        """
-        Get normalized solar generation profile for 24 hours (0-1 scale)
-        Returns array of 24 values that sum to 1.0
-        """
-        if self._solar_profile_hourly is not None:
-            return self._solar_profile_hourly
-        
-        if self.solar.profile_csv:
-            # Load from CSV if provided
-            profile = np.loadtxt(self.solar.profile_csv, delimiter=',')
-            assert len(profile) == 24, "Solar profile must have 24 hourly values"
-        else:
-            # Use typical solar curve (bell curve centered at noon)
-            # Hours 0-23, peak at hour 12
-            hours = np.arange(24)
-            profile = np.exp(-((hours - 12) ** 2) / (2 * 3.5 ** 2))  # Gaussian
-            profile[hours < 6] = 0  # No generation before 6 AM
-            profile[hours > 20] = 0  # No generation after 8 PM
-        
-        # Normalize to sum to 1.0
-        profile = profile / profile.sum()
-        self._solar_profile_hourly = profile
-        
-        return self._solar_profile_hourly
     
     def print_summary(self):
         """Print configuration summary"""

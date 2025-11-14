@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List
 import pandas as pd
+import pvlib
 
 from config_loader import ConfigLoader
 
@@ -62,22 +63,72 @@ class BatterySimulator:
         
         # Battery state
         self.battery_soc_kwh = 0.0  # Start empty
+        
+        # Pre-calculate solar profile for a year
+        self.solar_profile_kwh = self._create_solar_profile()
     
+    def _create_solar_profile(self) -> np.ndarray:
+        """
+        Creates a realistic hourly solar generation profile for a typical year
+        using pvlib, scaled to the configured yearly generation.
+        """
+        # Location for the Netherlands (Utrecht)
+        latitude = 52.09
+        longitude = 5.12
+        
+        # Create a full year of hourly timestamps
+        times = pd.date_range(
+            start="2025-01-01",
+            end="2025-12-31 23:00",
+            freq="h",
+            tz="Europe/Amsterdam"
+        )
+        
+        # Create a location object
+        location = pvlib.location.Location(latitude, longitude, tz="Europe/Amsterdam")
+        
+        # Get solar position
+        solar_position = location.get_solarposition(times)
+        
+        # Use a clear-sky model to get irradiance (GHI)
+        # This gives a realistic shape to the generation curve
+        clearsky = location.get_clearsky(times)
+        
+        # We use GHI as a proxy for panel generation potential.
+        # A more complex model would include panel tilt, orientation, etc.
+        # For this simulation, GHI provides a good enough daily/seasonal shape.
+        # We set negative GHI values to 0 (night time)
+        ghi = clearsky['ghi'].clip(lower=0)
+        
+        # The raw GHI is in W/m^2. We need to scale it to match the
+        # total configured yearly generation in kWh.
+        total_ghi_yearly = ghi.sum()
+        
+        # Scale factor to convert GHI (W/m^2) to kWh for the whole system
+        # The total energy is the sum of hourly power values
+        scaling_factor = self.config.solar.yearly_generation_kwh / total_ghi_yearly
+        
+        # The final profile is in kWh per hour (which is kW)
+        solar_profile_kw = ghi * scaling_factor
+        
+        return solar_profile_kw.values
+
     def run(self) -> SimulationResults:
         """Run complete simulation"""
-        start_date = datetime(2025, 1, 1)
-        total_hours = self.config.simulation_years * 365 * 24
-        
+        start_date = datetime(2026, 1, 1)
+        end_date = start_date.replace(year=start_date.year + self.config.simulation_years)
+        total_hours = int((end_date - start_date).total_seconds() / 3600)
+
         for hour_idx in range(total_hours):
             timestamp = start_date + timedelta(hours=hour_idx)
-            year_num = (hour_idx // (365 * 24)) + 1
-            
+            year_num = timestamp.year - start_date.year + 1
+
             hourly_data = self._simulate_hour(timestamp, year_num, hour_idx)
             self.hourly_results.append(hourly_data)
-            
+
             # Update battery SOC for next iteration
             self.battery_soc_kwh = hourly_data.battery_soc_kwh
-        
+
         return SimulationResults(hourly_data=self.hourly_results)
     
     def _simulate_hour(self, timestamp: datetime, year_num: int, hour_idx: int) -> HourlyData:
@@ -85,17 +136,25 @@ class BatterySimulator:
         hour_of_day = timestamp.hour
         month = timestamp.month
         day_of_year = timestamp.timetuple().tm_yday
-        
+
+        # The solar profile is for a 365-day year. We need to handle leap years
+        # to avoid index errors. On Feb 29, we reuse Feb 28's solar data.
+        # For all subsequent days in a leap year, we shift the day number back by one.
+        is_leap = timestamp.year % 4 == 0 and (timestamp.year % 100 != 0 or timestamp.year % 400 == 0)
+        if is_leap and day_of_year > 59:  # Day 60 is Feb 29
+            day_of_year -= 1
+
+        hour_of_year = (day_of_year - 1) * 24 + hour_of_day
+
         # Calculate current system parameters (with degradation)
-        solar_yearly_kwh = self._get_solar_generation_for_year(year_num)
         battery_capacity_kwh = self._get_battery_capacity_for_year(year_num)
+
+        # Get solar generation for this hour from the pre-calculated profile
+        solar_generation_kw = self.solar_profile_kwh[hour_of_year]
         
-        # Calculate generation for this hour
-        solar_profile = self.config.get_solar_profile_hourly()
-        # Daily profile scaled by seasonal variation
-        seasonal_factor = 1 + 0.4 * np.sin(2 * np.pi * (day_of_year - 80) / 365)  # Peak in summer
-        daily_generation = (solar_yearly_kwh / 365) * seasonal_factor
-        solar_generation_kw = daily_generation * solar_profile[hour_of_day]
+        # Apply degradation to solar generation
+        degradation_factor = (1 - self.config.solar.degradation_rate / 100) ** (year_num - 1)
+        solar_generation_kw *= degradation_factor
         
         # Consumption (constant)
         consumption_kw = self.config.consumption.constant_load_kw
@@ -111,7 +170,8 @@ class BatterySimulator:
             # Excess solar -> charge battery
             max_charge_kw = min(
                 net_power_kw,
-                battery_capacity_kwh - self.battery_soc_kwh  # Available capacity
+                battery_capacity_kwh - self.battery_soc_kwh,  # Available capacity
+                self.config.battery.max_power_kw  # Max charge power
             )
             battery_charge_kw = max_charge_kw
             
@@ -127,7 +187,8 @@ class BatterySimulator:
             discharge_efficiency = 1 - (self.config.battery.discharge_loss / 100)
             max_discharge_kw = min(
                 needed_kw,
-                self.battery_soc_kwh / discharge_efficiency  # Available energy
+                self.battery_soc_kwh / discharge_efficiency,  # Available energy
+                self.config.battery.max_power_kw  # Max discharge power
             )
             battery_discharge_kw = max_discharge_kw
             
@@ -166,7 +227,7 @@ class BatterySimulator:
             grid_import_kw=grid_import_kw,
             grid_export_kw=grid_export_kw,
             battery_soc_kwh=self.battery_soc_kwh,
-            battery_soc_percent=(self.battery_soc_kwh / battery_capacity_kwh * 100),
+            battery_soc_percent=(self.battery_soc_kwh / battery_capacity_kwh * 100) if battery_capacity_kwh > 0 else 0,
             battery_capacity_kwh=battery_capacity_kwh,
             consumption_tariff=consumption_tariff,
             export_tariff=export_tariff,
