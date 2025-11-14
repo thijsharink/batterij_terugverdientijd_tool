@@ -183,17 +183,28 @@ class BatterySimulator:
             # Deficit -> discharge battery
             needed_kw = abs(net_power_kw)
             
-            # Account for discharge losses
+            # Account for discharge losses (e.g., 0.93 for 7% loss)
             discharge_efficiency = 1 - (self.config.battery.discharge_loss / 100)
-            max_discharge_kw = min(
-                needed_kw,
-                self.battery_soc_kwh / discharge_efficiency,  # Available energy
-                self.config.battery.max_power_kw  # Max discharge power
+            
+            # The max power we can *deliver* is limited by the stored energy * efficiency
+            # e.g. 100 kWh stored at 93% eff. can only *deliver* 93 kW for 1 hour.
+            max_deliverable_kw_from_soc = self.battery_soc_kwh * discharge_efficiency
+            
+            # Determine the actual power we will *deliver* to the load
+            battery_discharge_kw = min(
+                needed_kw,                          # What the load needs
+                self.config.battery.max_power_kw,   # Max power of the inverter
+                max_deliverable_kw_from_soc         # Max power the battery can *deliver*
             )
-            battery_discharge_kw = max_discharge_kw
             
             # Apply discharge losses
-            self.battery_soc_kwh -= battery_discharge_kw * discharge_efficiency
+            # To *deliver* `battery_discharge_kw`, we must *drain*
+            # `battery_discharge_kw / discharge_efficiency` from the stored energy.
+            if discharge_efficiency > 1e-6: # Avoid division by zero
+                self.battery_soc_kwh -= battery_discharge_kw / discharge_efficiency
+            elif battery_discharge_kw > 0:
+                # If efficiency is 0% and we're trying to discharge, just drain it all
+                self.battery_soc_kwh = 0
         
         # Ensure SOC stays within bounds
         self.battery_soc_kwh = np.clip(self.battery_soc_kwh, 0, battery_capacity_kwh)
