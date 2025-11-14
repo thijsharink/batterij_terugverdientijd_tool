@@ -80,10 +80,18 @@ class GraphVisualizer:
 
         plt.tight_layout()
 
+    def _create_info_box(self, fig, position, color='aliceblue'):
+        """Creates an info box on the figure."""
+        ax = fig.add_axes(position)
+        ax.axis('off')
+        info_text = ax.text(0, 0.5, '', va='center', fontsize=10,
+                            bbox=dict(boxstyle="round,pad=0.5", fc=color, ec="black", lw=1))
+        return info_text
+
     def show_year_graph(self):
         """Single year detail (each month is one point/bar) with a year selector."""
         fig, axes = plt.subplots(3, 1, figsize=(14, 10))
-        fig.subplots_adjust(top=0.88, bottom=0.1, hspace=0.4)
+        fig.subplots_adjust(top=0.88, bottom=0.1, hspace=0.5, right=0.8)
 
         month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -130,6 +138,43 @@ class GraphVisualizer:
 
         fig.suptitle(f'Year {initial_year} - Monthly Detail', fontsize=16, fontweight='bold')
 
+        # Info text boxes
+        ax1_info = self._create_info_box(fig, [0.82, 0.70, 0.18, 0.15], color='lightyellow')
+        ax2_info = self._create_info_box(fig, [0.82, 0.40, 0.18, 0.20])
+        ax3_info = self._create_info_box(fig, [0.82, 0.10, 0.18, 0.15])
+
+        def update_info_texts(data):
+            # For ax1
+            total_savings = data['monthly_savings'].sum()
+            info1_text = f"Total Savings:\n{total_savings:.2f} €"
+            ax1_info.set_text(info1_text)
+
+            # For ax2
+            total_solar = data['solar_generation_kwh'].sum()
+            total_consumption = data['consumption_kwh'].sum()
+            total_charge = data['battery_charge_kwh'].sum()
+            total_discharge = data['battery_discharge_kwh'].sum()
+            info2_text = (
+                f"Yearly Totals (kWh):\n"
+                f"------------------\n"
+                f"PV Generation: {total_solar:.2f}\n"
+                f"Consumption: {total_consumption:.2f}\n"
+                f"Battery Charge: {total_charge:.2f}\n"
+                f"Battery Discharge: {total_discharge:.2f}"
+            )
+            ax2_info.set_text(info2_text)
+
+            # For ax3
+            total_grid_import = data['grid_import_kwh'].sum()
+            total_grid_export = data['grid_export_kwh'].sum()
+            info3_text = (
+                f"Yearly Totals (kWh):\n"
+                f"------------------\n"
+                f"Grid Import: {total_grid_import:.2f}\n"
+                f"Grid Export: {total_grid_export:.2f}"
+            )
+            ax3_info.set_text(info3_text)
+
         def update(year):
             year = int(year)
             monthly_data = self.analyzer.get_monthly_data(year)
@@ -154,7 +199,11 @@ class GraphVisualizer:
             ax3.relim()
             ax3.autoscale_view()
 
+            update_info_texts(monthly_data)
+
             fig.canvas.draw_idle()
+
+        update_info_texts(monthly_data)
 
         if self.config.simulation_years > 1:
             slider_ax = fig.add_axes([0.25, 0.93, 0.5, 0.03])
