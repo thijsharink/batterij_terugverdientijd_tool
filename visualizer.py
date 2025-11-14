@@ -6,7 +6,7 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.widgets import Slider, TextBox
+from matplotlib.widgets import Slider, TextBox, Button
 
 from analyzer import PaybackAnalysis, PaybackAnalyzer
 from config_loader import ConfigLoader
@@ -117,6 +117,7 @@ class GraphVisualizer:
         ax2.plot(months, monthly_data['consumption_kwh'], 'red', marker='s', linewidth=2, label='Consumption (kWh)')
         ax2.plot(months, monthly_data['battery_charge_kwh'], 'blue', marker='^', linewidth=2, label='Battery Charged (kWh)')
         ax2.plot(months, monthly_data['battery_discharge_kwh'], 'green', marker='v', linewidth=2, label='Battery Discharged (kWh)')
+        ax2.plot(months, monthly_data['grid_import_kwh'] - monthly_data['grid_export_kwh'], 'cyan', marker='x', linestyle=':', linewidth=2, label='Grid Interaction (kWh)')
         ax2.set_xlabel('Month')
         ax2.set_ylabel('Energy (kWh)')
         ax2.set_title('Monthly Energy Flows')
@@ -154,6 +155,8 @@ class GraphVisualizer:
             total_consumption = data['consumption_kwh'].sum()
             total_charge = data['battery_charge_kwh'].sum()
             total_discharge = data['battery_discharge_kwh'].sum()
+            total_grid_import = data['grid_import_kwh'].sum()
+            total_grid_export = data['grid_export_kwh'].sum()
             info2_text = (
                 f"Yearly Totals (kWh):\n"
                 f"------------------\n"
@@ -173,7 +176,7 @@ class GraphVisualizer:
                 f"Grid Import: {total_grid_import:.2f}\n"
                 f"Grid Export: {total_grid_export:.2f}"
             )
-            ax3_info.set_text(info3_text)
+            ax2_info.set_text(info2_text)
 
         def update(year):
             year = int(year)
@@ -191,6 +194,7 @@ class GraphVisualizer:
             ax2.lines[1].set_ydata(monthly_data['consumption_kwh'])
             ax2.lines[2].set_ydata(monthly_data['battery_charge_kwh'])
             ax2.lines[3].set_ydata(monthly_data['battery_discharge_kwh'])
+            ax2.lines[4].set_ydata(monthly_data['grid_import_kwh'] - monthly_data['grid_export_kwh'])
             ax2.relim()
             ax2.autoscale_view()
 
@@ -331,6 +335,7 @@ class GraphVisualizer:
             total_discharge = daily_data['battery_discharge_kw'].sum()
             total_grid_import = daily_data['grid_import_kw'].sum()
             total_grid_export = daily_data['grid_export_kw'].sum()
+            total_savings = -daily_data['battery_flow_cost'].sum()
 
             info1 = (
                 f"Daily Totals (kWh):\n"
@@ -340,7 +345,8 @@ class GraphVisualizer:
                 f"Battery Charge: {total_charge:.2f}\n"
                 f"Battery Discharge: {total_discharge:.2f}\n"
                 f"Grid Import: {total_grid_import:.2f}\n"
-                f"Grid Export: {total_grid_export:.2f}"
+                f"Grid Export: {total_grid_export:.2f}\n\n"
+                f"Total Savings: {total_savings:.2f} €"
             )
             ax1_info.set_text(info1)
 
@@ -353,19 +359,42 @@ class GraphVisualizer:
 
         def submit_date(text):
             try:
-                dt = datetime.strptime(text, '%Y-%m-%d')
-                if not (1 <= dt.year <= self.config.simulation_years):
+                parts = text.split('-')
+                if len(parts) != 3:
+                    raise ValueError("Date must be in Y-M-D format")
+
+                year, month, day = [int(p) for p in parts]
+
+                if not (1 <= year <= self.config.simulation_years):
                     print(f"Year must be between 1 and {self.config.simulation_years}")
                     return
-                update(dt.year, dt.month, dt.day)
-            except ValueError:
-                print(f"Invalid date format: '{text}'. Please use YYYY-MM-DD.")
 
-        text_ax = fig.add_axes([0.35, 0.93, 0.3, 0.04])
+                # Basic validation for month and day
+                if not (1 <= month <= 12):
+                    print(f"Invalid month: {month}. Must be between 1 and 12.")
+                    return
+                if not (1 <= day <= 31): # This is a simplification, but better than nothing
+                    print(f"Invalid day: {day}. Must be between 1 and 31.")
+                    return
+
+                update(year, month, day)
+            except (ValueError, TypeError):
+                print(f"Invalid date format: '{text}'. Please use Y-M-D format (e.g., 3-1-15).")
+
+        text_ax = fig.add_axes([0.35, 0.93, 0.2, 0.04])
         initial_text = f"{initial_year}-{initial_month:02d}-{initial_day:02d}"
-        date_text_box = TextBox(text_ax, "Date (YYYY-MM-DD)", initial=initial_text)
+        date_text_box = TextBox(text_ax, "Date (Y-M-D)", initial=initial_text)
         date_text_box.on_submit(submit_date)
         fig.date_text_box = date_text_box
+
+        button_ax = fig.add_axes([0.56, 0.93, 0.1, 0.04])
+        date_button = Button(button_ax, 'Update')
+
+        def submit_button_on_click(event):
+            submit_date(date_text_box.text)
+
+        date_button.on_clicked(submit_button_on_click)
+        fig.date_button = date_button
 
         update(initial_year, initial_month, initial_day)
 

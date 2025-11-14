@@ -20,6 +20,7 @@ class TariffConfig:
     night_rate: float  # €/kWh
     transport_rate: float  # €/kWh
     energy_tax: float  # €/kWh
+    feed_back_rate: float # €/kWh
     day_start_hour: int  # Start hour of day rate (0-23)
     day_end_hour: int  # End hour of day rate (0-23)
     
@@ -28,6 +29,7 @@ class TariffConfig:
     night_rate_increase: float  # % per year
     transport_rate_increase: float  # % per year
     energy_tax_increase: float  # % per year
+    feed_back_rate_increase_percent: float # % per year
 
 
 @dataclass
@@ -92,12 +94,14 @@ class ConfigLoader:
             night_rate=self._get_float('Tariff', 'night_rate'),
             transport_rate=self._get_float('Tariff', 'transport_rate'),
             energy_tax=self._get_float('Tariff', 'energy_tax'),
+            feed_back_rate=self._get_float('Tariff', 'feed_back_rate'),
             day_start_hour=self._get_int('Tariff', 'day_start_hour'),
             day_end_hour=self._get_int('Tariff', 'day_end_hour'),
             day_rate_increase=self._get_float('Tariff', 'day_rate_increase_percent'),
             night_rate_increase=self._get_float('Tariff', 'night_rate_increase_percent'),
             transport_rate_increase=self._get_float('Tariff', 'transport_rate_increase_percent'),
             energy_tax_increase=self.parser.getfloat('Tariff', 'energy_tax_increase_percent'),
+            feed_back_rate_increase_percent=self._get_float('Tariff', 'feed_back_rate_increase_percent'),
         )
     
     def _load_consumption(self) -> ConsumptionConfig:

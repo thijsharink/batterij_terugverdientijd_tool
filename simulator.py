@@ -280,22 +280,15 @@ class BatterySimulator:
         Get tariff for exporting to grid (€/kWh)
         NEGATIVE value = we receive this
         """
-        # Base rate (usually day rate for solar export)
-        if self.config.tariff.day_start_hour <= hour < self.config.tariff.day_end_hour:
-            base_rate = self.config.tariff.day_rate
-            rate_increase = self.config.tariff.day_rate_increase
-        else:
-            base_rate = self.config.tariff.night_rate
-            rate_increase = self.config.tariff.night_rate_increase
+        # Base rate for feedback
+        base_rate = self.config.tariff.feed_back_rate
+        rate_increase = self.config.tariff.feed_back_rate_increase_percent
         
         # Apply yearly increases
         rate = base_rate * (1 + rate_increase / 100) ** (year_num - 1)
-        transport = self.config.tariff.transport_rate * (1 + self.config.tariff.transport_rate_increase / 100) ** (year_num - 1)
-        tax = self.config.tariff.energy_tax * (1 + self.config.tariff.energy_tax_increase / 100) ** (year_num - 1)
-        
-        # When exporting: we PAY transport, but RECEIVE rate and tax compensation
-        # Net: we receive (rate + tax - transport), which is typically positive but less than consumption rate
-        return -(rate + tax - transport)
+
+        # The tariff is what we receive, so it's a negative cost.
+        return -rate
     
     def _calculate_battery_flow_cost(
         self,
