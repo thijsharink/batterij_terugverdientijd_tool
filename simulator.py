@@ -63,9 +63,32 @@ class BatterySimulator:
         
         # Battery state
         self.battery_soc_kwh = 0.0  # Start empty
+        self.cumulative_discharged_kwh = 0.0
+        self.initial_battery_capacity_kwh = self.config.battery.capacity_kwh
+        self.cycles_to_80_percent = self.config.battery.cycles_to_80_percent
+        self.calendar_degradation_rate = self.config.battery.calendar_degradation_rate / 100
+        self.start_timestamp = datetime(2026, 1, 1)
         
         # Pre-calculate solar profile for a year
         self.solar_profile_kwh = self._create_solar_profile()
+        
+        # Pre-calculate consumption profile for a year
+        self.consumption_profile_kw = self._create_consumption_profile()
+    
+    def _create_consumption_profile(self) -> np.ndarray:
+        """
+        Creates a constant hourly consumption profile for a typical year,
+        scaled to the configured yearly energy usage.
+        """
+        # A year has 8760 hours (365 * 24) or 8784 in a leap year (366 * 24)
+        # For simplicity, we'll use 8760 hours for the base profile,
+        # and handle leap year adjustments in _simulate_hour if necessary.
+        hours_in_year = 365 * 24
+        
+        # Distribute yearly energy usage evenly across all hours
+        hourly_consumption_kw = self.config.consumption.yearly_energy_usage_kwh / hours_in_year
+        
+        return np.full(hours_in_year, hourly_consumption_kw)
     
     def _create_solar_profile(self) -> np.ndarray:
         """
@@ -147,7 +170,7 @@ class BatterySimulator:
         hour_of_year = (day_of_year - 1) * 24 + hour_of_day
 
         # Calculate current system parameters (with degradation)
-        battery_capacity_kwh = self._get_battery_capacity_for_year(year_num)
+        battery_capacity_kwh = self._get_current_battery_capacity(timestamp)
 
         # Get solar generation for this hour from the pre-calculated profile
         solar_generation_kw = self.solar_profile_kwh[hour_of_year]
@@ -156,9 +179,9 @@ class BatterySimulator:
         degradation_factor = (1 - self.config.solar.degradation_rate / 100) ** (year_num - 1)
         solar_generation_kw *= degradation_factor
         
-        # Consumption (constant)
-        consumption_kw = self.config.consumption.constant_load_kw
-        
+        # Consumption
+        consumption_kw = self.consumption_profile_kw[hour_of_year]
+
         # Calculate net power (before battery)
         net_power_kw = solar_generation_kw - consumption_kw
         
@@ -205,6 +228,9 @@ class BatterySimulator:
             elif battery_discharge_kw > 0:
                 # If efficiency is 0% and we're trying to discharge, just drain it all
                 self.battery_soc_kwh = 0
+            
+            # Add this line here (after discharge calculation and SOC update)
+            self.cumulative_discharged_kwh += battery_discharge_kw
         
         # Ensure SOC stays within bounds
         self.battery_soc_kwh = np.clip(self.battery_soc_kwh, 0, battery_capacity_kwh)
@@ -250,11 +276,23 @@ class BatterySimulator:
         degradation_factor = (1 - self.config.solar.degradation_rate / 100) ** (year_num - 1)
         return self.config.solar.yearly_generation_kwh * degradation_factor
     
-    def _get_battery_capacity_for_year(self, year_num: int) -> float:
-        """Get battery capacity for a given year (with degradation)"""
-        degradation_factor = (1 - self.config.battery.degradation_rate / 100) ** (year_num - 1)
-        return self.config.battery.capacity_kwh * degradation_factor
-    
+
+    def _get_current_battery_capacity(self, timestamp: datetime) -> float:
+        """Calculate current battery capacity based on cumulative cycles and calendar aging"""
+        if self.cycles_to_80_percent <= 0:
+            return self.initial_battery_capacity_kwh
+        
+        cumulative_cycles = self.cumulative_discharged_kwh / self.initial_battery_capacity_kwh
+        cycle_fade_fraction = (cumulative_cycles / self.cycles_to_80_percent) * 0.2
+        
+        elapsed_days = (timestamp - self.start_timestamp).days
+        elapsed_years = elapsed_days / 365.25
+        calendar_fade_fraction = elapsed_years * self.calendar_degradation_rate
+        
+        # Use multiplicative for total fade to avoid exceeding 100%
+        retention = (1 - cycle_fade_fraction) * (1 - calendar_fade_fraction)
+        return max(0.0, self.initial_battery_capacity_kwh * retention)
+
     def _get_consumption_tariff(self, hour: int, year_num: int) -> float:
         """
         Get tariff for consuming from grid (€/kWh)

@@ -35,7 +35,7 @@ class TariffConfig:
 @dataclass
 class ConsumptionConfig:
     """Energy consumption configuration"""
-    constant_load_kw: float  # Constant base load in kW
+    yearly_energy_usage_kwh: float  # Total annual energy usage in kWh
 
 
 @dataclass
@@ -51,7 +51,8 @@ class BatteryConfig:
     capacity_kwh: float  # Usable capacity
     charge_loss: float  # % loss when charging
     discharge_loss: float  # % loss when discharging
-    degradation_rate: float  # % per year
+    cycles_to_80_percent: float  # Full cycles to 80% capacity
+    calendar_degradation_rate: float  # % per year from calendar aging
     investment_euros: float  # Total investment cost
     max_power_kw: float  # Max charge/discharge power in kW
 
@@ -107,7 +108,7 @@ class ConfigLoader:
     def _load_consumption(self) -> ConsumptionConfig:
         """Load consumption configuration"""
         return ConsumptionConfig(
-            constant_load_kw=self._get_float('Consumption', 'constant_load_kw')
+            yearly_energy_usage_kwh=self._get_float('Consumption', 'yearly_energy_usage_kwh')
         )
     
     def _load_solar(self) -> SolarConfig:
@@ -123,7 +124,8 @@ class ConfigLoader:
             capacity_kwh=self._get_float('Battery', 'capacity_kwh'),
             charge_loss=self._get_float('Battery', 'charge_loss_percent'),
             discharge_loss=self._get_float('Battery', 'discharge_loss_percent'),
-            degradation_rate=self._get_float('Battery', 'degradation_rate_percent'),
+            cycles_to_80_percent=self._get_float('Battery', 'cycles_to_80_percent'),
+            calendar_degradation_rate=self._get_float('Battery', 'calendar_degradation_rate_percent'),
             investment_euros=self._get_float('Battery', 'investment_euros'),
             max_power_kw=self._get_float('Battery', 'max_power_kw')
         )
@@ -134,7 +136,7 @@ class ConfigLoader:
         assert self.tariff.day_start_hour < self.tariff.day_end_hour, "Day start must be before day end"
         assert 0 <= self.tariff.day_start_hour <= 23, "Day start hour must be 0-23"
         assert 0 <= self.tariff.day_end_hour <= 23, "Day end hour must be 0-23"
-        assert self.consumption.constant_load_kw > 0, "Load must be positive"
+        assert self.consumption.yearly_energy_usage_kwh > 0, "Yearly energy usage must be positive"
         assert self.solar.yearly_generation_kwh > 0, "Solar generation must be positive"
         assert self.battery.capacity_kwh > 0, "Battery capacity must be positive"
         assert self.battery.investment_euros > 0, "Investment must be positive"
@@ -149,7 +151,7 @@ class ConfigLoader:
         print(f"  Energy tax: €{self.tariff.energy_tax:.4f}/kWh")
         
         print(f"\n[Consumption]")
-        print(f"  Constant load: {self.consumption.constant_load_kw:.2f} kW ({self.consumption.constant_load_kw * 24 * 365:.0f} kWh/year)")
+        print(f"  Yearly energy usage: {self.consumption.yearly_energy_usage_kwh:,.0f} kWh")
         
         print(f"\n[Solar PV]")
         print(f"  Yearly generation: {self.solar.yearly_generation_kwh:,.0f} kWh")
