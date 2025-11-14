@@ -33,22 +33,22 @@ class GraphVisualizer:
         """Multi-year overview (each year is one point/bar)"""
         yearly_data = self.analyzer.get_yearly_data()
 
-        fig, axes = plt.subplots(3, 1, figsize=(14, 10))
+        fig, axes = plt.subplots(4, 1, figsize=(14, 12))
         fig.suptitle('Multi-Year Overview', fontsize=16, fontweight='bold')
 
         years = yearly_data['year'].values
 
         # --- Subplot 1: Total Balance & Payback ---
         ax1 = axes[0]
-        ax1.plot(years, yearly_data['total_balance'], 'b-o', linewidth=2, label='Total Balance (€)')
-        ax1.axhline(y=0, color='r', linestyle='--', linewidth=2, label='Payback Threshold (€)')
+        ax1.plot(years, yearly_data['total_balance'], 'b-o', linewidth=2, label='Battery Total Balance (€)')
+        ax1.axhline(y=0, color='r', linestyle='--', linewidth=2, label='Battery Payback Threshold (€)')
 
         if self.analysis.payback_achieved:
-            ax1.axvline(x=self.analysis.payback_year, color='g', linestyle=':', linewidth=2, label='Payback Point')
+            ax1.axvline(x=self.analysis.payback_year, color='g', linestyle=':', linewidth=2, label='Battery Payback Point')
 
         ax1.set_xlabel('Year')
         ax1.set_ylabel('Euros (€)')
-        ax1.set_title('Total Balance Over Years')
+        ax1.set_title('Battery Payback and Balance')
         ax1.grid(True, alpha=0.3)
         ax1.set_xlim(0.5, years[-1] + 0.5)
         self._add_interactive_legend(ax1)
@@ -78,6 +78,16 @@ class GraphVisualizer:
         ax3.set_xlim(0.5, years[-1] + 0.5)
         self._add_interactive_legend(ax3)
 
+        # --- Subplot 4: Expected Energy Cost ---
+        ax4 = axes[3]
+        ax4.plot(years, yearly_data['grid_flow_cost'], 'm-s', linewidth=2, label='Expected Energy Cost (€)')
+        ax4.set_xlabel('Year')
+        ax4.set_ylabel('Euros (€)')
+        ax4.set_title('Annual Grid Energy Cost')
+        ax4.grid(True, alpha=0.3)
+        ax4.set_xlim(0.5, years[-1] + 0.5)
+        self._add_interactive_legend(ax4)
+
         plt.tight_layout()
 
     def _create_info_box(self, fig, position, color='aliceblue'):
@@ -104,9 +114,10 @@ class GraphVisualizer:
 
         # Subplot 1: Monthly Savings
         ax1.bar(months, monthly_data['monthly_savings'], color='green', alpha=0.7, label='Monthly Savings (€)')
+        ax1.plot(months, monthly_data['grid_flow_cost'], 'm-s', linewidth=2, label='Expected Energy Cost (€)')
         ax1.set_xlabel('Month')
-        ax1.set_ylabel('Savings (€)')
-        ax1.set_title('Monthly Battery Savings')
+        ax1.set_ylabel('Euros (€)')
+        ax1.set_title('Monthly Costs and Savings')
         ax1.set_xticks(months)
         ax1.set_xticklabels([month_names[m - 1] for m in months])
         ax1.grid(True, alpha=0.3, axis='y')
@@ -187,6 +198,7 @@ class GraphVisualizer:
             bar_container = ax1.containers[0]
             for i, rect in enumerate(bar_container):
                 rect.set_height(monthly_data['monthly_savings'].iloc[i])
+            ax1.lines[0].set_ydata(monthly_data['grid_flow_cost'])
             ax1.relim()
             ax1.autoscale_view()
 
@@ -266,14 +278,15 @@ class GraphVisualizer:
 
         # Subplot 3: Savings
         l3_1, = ax3.plot([], [], 'brown', marker='D', linewidth=2, linestyle='--', label='Battery Savings (€/h)')
+        l3_2, = ax3.plot([], [], 'm', marker='s', linewidth=2, linestyle=':', label='Expected Energy Cost (€/h)')
 
         ax3.set_xlabel('Hour of Day')
-        ax3.set_ylabel('Hourly Savings (€)', color='brown')
-        ax3.set_title('Hourly Savings')
+        ax3.set_ylabel('Euros (€/h)')
+        ax3.set_title('Hourly Costs and Savings')
         ax3.grid(True, alpha=0.3)
         ax3.set_xlim(-0.5, 23.5)
         ax3.set_xticks(range(0, 24, 2))
-        ax3.tick_params(axis='y', labelcolor='brown')
+        ax3.tick_params(axis='y', labelcolor='black')
         self._add_interactive_legend(ax3)
 
         # Info text boxes
@@ -291,7 +304,7 @@ class GraphVisualizer:
             daily_data = self.analyzer.get_daily_data(year, month, day)
 
             if daily_data.empty:
-                for line in lines1 + [l2_1, l2_2, l3_1]:
+                for line in lines1 + [l2_1, l2_2, l3_1, l3_2]:
                     line.set_data([], [])
                 fig.suptitle(f'No data for {year}-{month}-{day}', fontsize=16, fontweight='bold')
                 ax1_info.set_text('No data')
@@ -325,6 +338,7 @@ class GraphVisualizer:
             ax2_pct.autoscale_view()
 
             l3_1.set_data(hours, -daily_data['battery_flow_cost'])
+            l3_2.set_data(hours, daily_data['grid_flow_cost'])
             ax3.relim()
             ax3.autoscale_view()
 

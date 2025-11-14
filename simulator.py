@@ -42,6 +42,7 @@ class HourlyData:
     battery_flow_cost: float  # Cost of energy flowing through battery
     # Positive = cost when charging (opportunity cost of not exporting)
     # Negative = savings when discharging (avoiding grid import)
+    grid_flow_cost: float  # Cost of energy flowing from/to the grid. Positive = cost, Negative = revenue
 
 
 @dataclass
@@ -251,7 +252,11 @@ class BatterySimulator:
             export_tariff,
             consumption_tariff
         )
-        
+
+        # Cost of energy flowing from/to the grid.
+        # Positive = cost (import), Negative = revenue (export)
+        grid_flow_cost = (grid_import_kw * consumption_tariff) + (grid_export_kw * export_tariff)
+
         return HourlyData(
             timestamp=timestamp,
             year=year_num,
@@ -268,7 +273,8 @@ class BatterySimulator:
             battery_capacity_kwh=battery_capacity_kwh,
             consumption_tariff=consumption_tariff,
             export_tariff=export_tariff,
-            battery_flow_cost=battery_flow_cost
+            battery_flow_cost=battery_flow_cost,
+            grid_flow_cost=grid_flow_cost
         )
     
     def _get_solar_generation_for_year(self, year_num: int) -> float:

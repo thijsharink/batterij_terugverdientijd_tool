@@ -59,6 +59,8 @@ def main():
     print(f"Total Battery Charged: {analysis.total_battery_charged:,.0f} kWh")
     print(f"Total Battery Discharged: {analysis.total_battery_discharged:,.0f} kWh")
     print(f"Battery Round-trip Efficiency: {analysis.battery_efficiency:.1f}%")
+    print(f"\nTotal Project Cost (incl. investment): €{analysis.total_project_cost:,.2f}")
+    print(f"Expected Yearly Energy Cost (Last Year): €{analysis.last_year_grid_cost:,.2f}")
     
     # Visualize
     print("\n[4/4] Generating visualizations...")

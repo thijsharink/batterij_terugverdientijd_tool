@@ -24,6 +24,8 @@ class PaybackAnalysis:
     total_battery_charged: float  # kWh
     total_battery_discharged: float  # kWh
     battery_efficiency: float  # Round-trip efficiency %
+    total_project_cost: float # Total cost of the project over all years (€)
+    last_year_grid_cost: float # Expected yearly energy cost of the last year (€)
 
 
 class PaybackAnalyzer:
@@ -61,6 +63,16 @@ class PaybackAnalyzer:
         # Round-trip efficiency (energy out / energy in)
         battery_eff = (total_discharged / total_charged * 100) if total_charged > 0 else 0
         
+        # Round-trip efficiency (energy out / energy in)
+        battery_eff = (total_discharged / total_charged * 100) if total_charged > 0 else 0
+
+        # Calculate new metrics
+        total_project_cost = self.df['grid_flow_cost'].sum() + investment
+        
+        last_year = self.config.simulation_years
+        last_year_df = self.df[self.df['year'] == last_year]
+        last_year_grid_cost = last_year_df['grid_flow_cost'].sum()
+        
         return PaybackAnalysis(
             total_savings=total_savings,
             payback_achieved=payback_achieved,
@@ -69,7 +81,9 @@ class PaybackAnalyzer:
             total_pv_generated=total_pv,
             total_battery_charged=total_charged,
             total_battery_discharged=total_discharged,
-            battery_efficiency=battery_eff
+            battery_efficiency=battery_eff,
+            total_project_cost=total_project_cost,
+            last_year_grid_cost=last_year_grid_cost
         )
     
     def get_yearly_data(self):
@@ -82,6 +96,7 @@ class PaybackAnalyzer:
             'grid_import_kw': 'sum',
             'grid_export_kw': 'sum',
             'battery_flow_cost': 'sum',
+            'grid_flow_cost': 'sum',
             'battery_capacity_kwh': 'first',  # Capacity at start of year
         }).reset_index()
         
@@ -113,6 +128,7 @@ class PaybackAnalyzer:
             'grid_import_kw': 'sum',
             'grid_export_kw': 'sum',
             'battery_flow_cost': 'sum',
+            'grid_flow_cost': 'sum',
             'battery_capacity_kwh': 'first',
         }).reset_index()
         
