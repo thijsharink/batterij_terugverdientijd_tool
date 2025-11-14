@@ -27,6 +27,10 @@ The codebase is designed for **extensibility and maintainability**:
 ## Installation
 
 ```bash
+git clone https://github.com/thijsharink/batterij_terugverdientijd_tool.git
+```
+
+```bash
 pip install -r requirements.txt
 ```
 

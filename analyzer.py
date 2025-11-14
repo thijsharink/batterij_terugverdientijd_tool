@@ -89,6 +89,9 @@ class PaybackAnalyzer:
         yearly['annual_savings'] = -yearly['battery_flow_cost']
         yearly['cumulative_savings'] = yearly['annual_savings'].cumsum()
         
+        # Calculate total balance (investment + cumulative savings)
+        yearly['total_balance'] = yearly['cumulative_savings'] - self.config.battery_investment
+        
         # Convert kW*hours to kWh
         energy_cols = ['solar_generation_kw', 'consumption_kw', 'battery_charge_kw',
                       'battery_discharge_kw', 'grid_import_kw', 'grid_export_kw']
