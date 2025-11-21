@@ -31,7 +31,7 @@ class EpexProjector:
         days = hours / 24
         
         # Base price
-        base_price = 0.08  # €/kWh
+        base_price = 0.083  # €/kWh
         
         # Seasonal pattern (cheaper in summer)
         seasonal_effect = -0.03 * np.cos(2 * np.pi * (days - 172) / 365.25)

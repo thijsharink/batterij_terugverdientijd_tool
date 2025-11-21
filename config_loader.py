@@ -15,12 +15,12 @@ class StaticTariffConfig:
     """Static energy tariff configuration"""
     day_rate: float
     night_rate: float
-    feed_back_rate: float
+    feed_in_rate: float
     day_start_hour: int
     day_end_hour: int
     day_rate_increase: float
     night_rate_increase: float
-    feed_back_rate_increase_percent: float
+    feed_in_rate_increase_percent: float
 
 @dataclass
 class DynamicTariffConfig:
@@ -90,11 +90,13 @@ class ConfigLoader:
     
     def _get_float(self, section: str, key: str) -> float:
         """Get float value from config"""
-        return self.parser.getfloat(section, key)
-    
+        value_str = self.parser.get(section, key)
+        return float(value_str.split('#')[0].strip())
+
     def _get_int(self, section: str, key: str) -> int:
         """Get int value from config"""
-        return self.parser.getint(section, key)
+        value_str = self.parser.get(section, key)
+        return int(float(value_str.split('#')[0].strip()))
     
     def _get_str(self, section: str, key: str, fallback: str = None) -> Optional[str]:
         """Get string value from config"""
@@ -108,25 +110,27 @@ class ConfigLoader:
         dynamic_config = None
         
         if tariff_type == 'static':
+            if not self.parser.has_section('TariffStatic'):
+                raise ValueError("Config Error: Tariff type is 'static' but [TariffStatic] section is missing.")
             static_config = StaticTariffConfig(
-                day_rate=self._get_float('Tariff', 'day_rate'),
-                night_rate=self._get_float('Tariff', 'night_rate'),
-                feed_back_rate=self._get_float('Tariff', 'feed_back_rate'),
-                day_start_hour=self._get_int('Tariff', 'day_start_hour'),
-                day_end_hour=self._get_int('Tariff', 'day_end_hour'),
-                day_rate_increase=self._get_float('Tariff', 'day_rate_increase_percent'),
-                night_rate_increase=self._get_float('Tariff', 'night_rate_increase_percent'),
-                feed_back_rate_increase_percent=self._get_float('Tariff', 'feed_back_rate_increase_percent'),
+                day_rate=self._get_float('TariffStatic', 'day_rate'),
+                night_rate=self._get_float('TariffStatic', 'night_rate'),
+                feed_in_rate=self._get_float('TariffStatic', 'feed_in_rate'),
+                day_start_hour=self._get_int('TariffStatic', 'day_start_hour'),
+                day_end_hour=self._get_int('TariffStatic', 'day_end_hour'),
+                day_rate_increase=self._get_float('TariffStatic', 'day_rate_increase_percent'),
+                night_rate_increase=self._get_float('TariffStatic', 'night_rate_increase_percent'),
+                feed_in_rate_increase_percent=self._get_float('TariffStatic', 'feed_in_rate_increase_percent'),
             )
         elif tariff_type == 'dynamic':
             # Check if section exists
-            if not self.parser.has_section('DynamicTariff'):
-                raise ValueError("Config Error: Tariff type is 'dynamic' but [DynamicTariff] section is missing.")
+            if not self.parser.has_section('TariffDynamic'):
+                raise ValueError("Config Error: Tariff type is 'dynamic' but [TariffDynamic] section is missing.")
             
             dynamic_config = DynamicTariffConfig(
-                trader_fee=self._get_float('DynamicTariff', 'trader_fee'),
-                feed_in_fee=self._get_float('DynamicTariff', 'feed_in_fee'),
-                epex_price_increase_percent=self._get_float('DynamicTariff', 'epex_price_increase_percent'),
+                trader_fee=self._get_float('TariffDynamic', 'trader_fee'),
+                feed_in_fee=self._get_float('TariffDynamic', 'feed_in_fee'),
+                epex_price_increase_percent=self._get_float('TariffDynamic', 'epex_price_increase_percent'),
             )
         else:
             raise ValueError(f"Invalid tariff type: {tariff_type}. Must be 'static' or 'dynamic'.")
@@ -136,7 +140,7 @@ class ConfigLoader:
             transport_rate=self._get_float('Tariff', 'transport_rate'),
             energy_tax=self._get_float('Tariff', 'energy_tax'),
             transport_rate_increase=self._get_float('Tariff', 'transport_rate_increase_percent'),
-            energy_tax_increase=self.parser.getfloat('Tariff', 'energy_tax_increase_percent'),
+            energy_tax_increase=self._get_float('Tariff', 'energy_tax_increase_percent'),
             static=static_config,
             dynamic=dynamic_config
         )

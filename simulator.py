@@ -349,8 +349,8 @@ class BatterySimulator:
         """
         if self.config.tariff.tariff_type == 'static':
             # Base rate for feedback
-            base_rate = self.config.tariff.static.feed_back_rate
-            rate_increase = self.config.tariff.static.feed_back_rate_increase_percent
+            base_rate = self.config.tariff.static.feed_in_rate
+            rate_increase = self.config.tariff.static.feed_in_rate_increase_percent
             
             # Apply yearly increases
             rate = base_rate * (1 + rate_increase / 100) ** (year_num - 1)
