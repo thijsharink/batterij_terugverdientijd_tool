@@ -80,7 +80,11 @@ class BatterySimulator:
         # EPEX projector for dynamic tariffs
         self.epex_projector = None
         if self.config.tariff.tariff_type == 'dynamic':
-            self.epex_projector = EpexProjector()
+            self.epex_projector = EpexProjector(
+                country=self.config.tariff.dynamic.epex_country,
+                start_date_str=self.config.tariff.dynamic.epex_start_date,
+                stop_date_str=self.config.tariff.dynamic.epex_stop_date
+            )
     
     def _create_consumption_profile(self) -> np.ndarray:
         """

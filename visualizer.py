@@ -415,7 +415,7 @@ class GraphVisualizer:
     def _add_interactive_legend(self, ax):
         """
         Adds an interactive legend to a subplot.
-        Clicking on a legend entry toggles the visibility of the corresponding artist.
+        Clicking on a legend entry toggles the visibility of the corresponding artist and rescales the Y-axis.
         """
         fig = ax.get_figure()
 
@@ -481,6 +481,48 @@ class GraphVisualizer:
 
                 if is_visible is not None:
                     leg_text.set_alpha(0.3 if is_visible else 1.0)
+                    
+                    # --- Start of change: Rescale Y-axis ---
+                    ax = original_artist.axes
+                    
+                    all_y_data = []
+
+                    # From lines
+                    for line in ax.get_lines():
+                        if line.get_visible():
+                            y_data = line.get_ydata()
+                            if y_data.size > 0:
+                                all_y_data.append(y_data)
+
+                    # From bar containers
+                    for container in ax.containers:
+                        if isinstance(container, plt.matplotlib.container.BarContainer) and container.patches and container.patches[0].axes == ax:
+                            if any(p.get_visible() for p in container.patches):
+                                for patch in container.patches:
+                                    if patch.get_visible():
+                                        all_y_data.append([patch.get_y(), patch.get_y() + patch.get_height()])
+                    
+                    if all_y_data:
+                        # Flatten list and calculate bounds
+                        flat_y = np.concatenate(all_y_data)
+                        flat_y = flat_y[np.isfinite(flat_y)] # remove non-finite values
+
+                        if flat_y.size > 0:
+                            min_y, max_y = np.min(flat_y), np.max(flat_y)
+                            margin = (max_y - min_y) * 0.1
+                            if margin == 0:
+                                margin = 1.0  # Handle single point or horizontal line
+                            
+                            ax.set_ylim(min_y - margin, max_y + margin)
+                        else:
+                           ax.relim()
+                           ax.autoscale_view()
+                    else:
+                        # No visible data, reset axis
+                        ax.relim()
+                        ax.autoscale_view()
+                    # --- End of change ---
+
                     fig.canvas.draw()
 
             fig.canvas.mpl_connect('pick_event', on_pick)

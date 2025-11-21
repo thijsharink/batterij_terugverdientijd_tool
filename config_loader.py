@@ -28,6 +28,9 @@ class DynamicTariffConfig:
     trader_fee: float
     feed_in_fee: float
     epex_price_increase_percent: float
+    epex_country: str
+    epex_start_date: str
+    epex_stop_date: str
 
 @dataclass
 class TariffConfig:
@@ -131,6 +134,9 @@ class ConfigLoader:
                 trader_fee=self._get_float('TariffDynamic', 'trader_fee'),
                 feed_in_fee=self._get_float('TariffDynamic', 'feed_in_fee'),
                 epex_price_increase_percent=self._get_float('TariffDynamic', 'epex_price_increase_percent'),
+                epex_country=self._get_str('TariffDynamic', 'epex_country', fallback='Netherlands'),
+                epex_start_date=self._get_str('TariffDynamic', 'epex_start_date'),
+                epex_stop_date=self._get_str('TariffDynamic', 'epex_stop_date'),
             )
         else:
             raise ValueError(f"Invalid tariff type: {tariff_type}. Must be 'static' or 'dynamic'.")
@@ -193,6 +199,8 @@ class ConfigLoader:
             print(f"  Trader fee: €{self.tariff.dynamic.trader_fee:.4f}/kWh")
             print(f"  Feed-in fee: €{self.tariff.dynamic.feed_in_fee:.4f}/kWh (additional)")
             print(f"  EPEX price increase: {self.tariff.dynamic.epex_price_increase_percent:.2f}% per year")
+            print(f"  EPEX data source: {self.tariff.dynamic.epex_country}.csv")
+            print(f"  EPEX data window: {self.tariff.dynamic.epex_start_date} to {self.tariff.dynamic.epex_stop_date}")
         
         print(f"  Transport: €{self.tariff.transport_rate:.4f}/kWh")
         print(f"  Energy tax: €{self.tariff.energy_tax:.4f}/kWh")
