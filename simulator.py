@@ -20,6 +20,7 @@ class HourlyData:
     timestamp: datetime
     year: int  # Simulation year (1-indexed)
     month: int  # 1-12
+    day: int   # Day of month
     hour: int  # 0-23
     
     # Energy flows (kW)
@@ -169,6 +170,7 @@ class BatterySimulator:
         """Simulate a single hour"""
         hour_of_day = timestamp.hour
         month = timestamp.month
+        day = timestamp.day
         day_of_year = timestamp.timetuple().tm_yday
 
         # The solar profile is for a 365-day year. We need to handle leap years
@@ -271,6 +273,7 @@ class BatterySimulator:
             timestamp=timestamp,
             year=year_num,
             month=month,
+            day=day,
             hour=hour_of_day,
             solar_generation_kw=solar_generation_kw,
             consumption_kw=consumption_kw,

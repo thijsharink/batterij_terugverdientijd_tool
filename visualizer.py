@@ -1,12 +1,9 @@
-"""
-Visualization module
-Creates interactive graphs for multi-year, yearly, and daily views
-"""
 from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.widgets import Slider, TextBox, Button
+from matplotlib.ticker import FuncFormatter
 
 from analyzer import PaybackAnalysis, PaybackAnalyzer
 from config_loader import ConfigLoader
@@ -21,6 +18,24 @@ class GraphVisualizer:
         self.results = results
         self.analysis = analysis
         self.analyzer = PaybackAnalyzer(config, results)
+        self.df = results.to_dataframe()
+
+    def _format_number(self, n, pos=None):
+        if n is None or not isinstance(n, (int, float)):
+            return n
+
+        val = abs(n)
+
+        if val < 1:
+            return f"{n:.3f}"
+        if val < 10:
+            return f"{n:.2f}"
+        if val < 100:
+            return f"{n:.1f}"
+        if val < 1000:
+            return f"{n:.0f}"
+
+        return f"{int(round(n, 0)):,}".replace(",", ".")
 
     def show_all(self):
         """Show all three graph types"""
@@ -33,10 +48,11 @@ class GraphVisualizer:
         """Multi-year overview (each year is one point/bar)"""
         yearly_data = self.analyzer.get_yearly_data()
 
-        fig, axes = plt.subplots(4, 1, figsize=(14, 12))
+        fig, axes = plt.subplots(5, 1, figsize=(14, 15))
         fig.suptitle('Multi-Year Overview', fontsize=16, fontweight='bold')
 
         years = yearly_data['year'].values
+        formatter = FuncFormatter(self._format_number)
 
         # --- Subplot 1: Total Balance & Payback ---
         ax1 = axes[0]
@@ -46,12 +62,13 @@ class GraphVisualizer:
         if self.analysis.payback_achieved:
             ax1.axvline(x=self.analysis.payback_year, color='g', linestyle=':', linewidth=2, label='Battery Payback Point')
 
-        ax1.set_xlabel('Year')
         ax1.set_ylabel('Euros (€)')
         ax1.set_title('Battery Payback and Balance')
         ax1.grid(True, alpha=0.3)
         ax1.set_xlim(0.5, years[-1] + 0.5)
+        ax1.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax1)
+        plt.setp(ax1.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # --- Subplot 2: Energy Flows (kWh) ---
         ax2 = axes[1]
@@ -60,35 +77,50 @@ class GraphVisualizer:
         ax2.plot(years, yearly_data['battery_charge_kwh'], 'blue', marker='^', label='Battery Charged (kWh)')
         ax2.plot(years, yearly_data['battery_discharge_kwh'], 'green', marker='v', label='Battery Discharged (kWh)')
 
-        ax2.set_xlabel('Year')
         ax2.set_ylabel('Energy (kWh)')
         ax2.set_title('Annual Energy Flows')
         ax2.grid(True, alpha=0.3)
         ax2.set_xlim(0.5, years[-1] + 0.5)
+        ax2.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax2)
+        plt.setp(ax2.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # --- Subplot 3: Battery Capacity Degradation ---
         ax3 = axes[2]
         ax3.plot(years, yearly_data['battery_capacity_kwh'], 'purple', marker='D', linewidth=2, label='Battery Capacity (kWh)')
 
-        ax3.set_xlabel('Year')
         ax3.set_ylabel('Capacity (kWh)')
         ax3.set_title('Battery Degradation')
         ax3.grid(True, alpha=0.3)
         ax3.set_xlim(0.5, years[-1] + 0.5)
+        ax3.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax3)
+        plt.setp(ax3.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # --- Subplot 4: Expected Energy Cost ---
         ax4 = axes[3]
         ax4.plot(years, yearly_data['grid_flow_cost'], 'm-s', linewidth=2, label='Expected Energy Cost (€)')
-        ax4.set_xlabel('Year')
         ax4.set_ylabel('Euros (€)')
         ax4.set_title('Annual Grid Energy Cost')
         ax4.grid(True, alpha=0.3)
         ax4.set_xlim(0.5, years[-1] + 0.5)
+        ax4.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax4)
+        plt.setp(ax4.get_xticklabels(), visible=False) # Hide x-tick labels
 
-        plt.tight_layout()
+        # --- Subplot 5: Average Energy Price ---
+        ax5 = axes[4]
+        avg_yearly_price = self.df.groupby('year')['consumption_tariff'].mean()
+        ax5.plot(avg_yearly_price.index, avg_yearly_price.values, 'teal', marker='p', linewidth=2, label='Avg. Grid Buy Price (€/kWh)')
+        ax5.set_xlabel('Year')
+        ax5.set_ylabel('Price (€/kWh)')
+        ax5.set_title('Average Annual Grid Buy Price')
+        ax5.grid(True, alpha=0.3)
+        ax5.set_xlim(0.5, years[-1] + 0.5)
+        ax5.yaxis.set_major_formatter(formatter)
+        self._add_interactive_legend(ax5)
+
+        fig.subplots_adjust(right=0.8, hspace=0.25) # Increased hspace to 0.8
 
     def _create_info_box(self, fig, position, color='aliceblue'):
         """Creates an info box on the figure."""
@@ -100,13 +132,18 @@ class GraphVisualizer:
 
     def show_year_graph(self):
         """Single year detail (each month is one point/bar) with a year selector."""
-        fig, axes = plt.subplots(3, 1, figsize=(14, 10))
-        fig.subplots_adjust(top=0.88, bottom=0.1, hspace=0.5, right=0.8)
+        fig, axes = plt.subplots(4, 1, figsize=(14, 12))
+        
+        ax1, ax2, ax3, ax4 = axes
+        fig.subplots_adjust(top=0.85, bottom=0.1, hspace=0.25, right=0.65) # Adjusted hspace and top
+        formatter = FuncFormatter(self._format_number)
+        ax1.yaxis.set_major_formatter(formatter)
+        ax2.yaxis.set_major_formatter(formatter)
+        ax3.yaxis.set_major_formatter(formatter)
+        ax4.yaxis.set_major_formatter(formatter)
 
         month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-        ax1, ax2, ax3 = axes
 
         initial_year = 1
         monthly_data = self.analyzer.get_monthly_data(initial_year)
@@ -115,13 +152,13 @@ class GraphVisualizer:
         # Subplot 1: Monthly Savings
         ax1.bar(months, monthly_data['monthly_savings'], color='green', alpha=0.7, label='Monthly Savings (€)')
         ax1.plot(months, monthly_data['grid_flow_cost'], 'm-s', linewidth=2, label='Expected Energy Cost (€)')
-        ax1.set_xlabel('Month')
         ax1.set_ylabel('Euros (€)')
         ax1.set_title('Monthly Costs and Savings')
         ax1.set_xticks(months)
         ax1.set_xticklabels([month_names[m - 1] for m in months])
         ax1.grid(True, alpha=0.3, axis='y')
         self._add_interactive_legend(ax1)
+        plt.setp(ax1.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # Subplot 2: Energy Flows
         ax2.plot(months, monthly_data['solar_generation_kwh'], 'gold', marker='o', linewidth=2, label='PV Generation (kWh)')
@@ -129,36 +166,47 @@ class GraphVisualizer:
         ax2.plot(months, monthly_data['battery_charge_kwh'], 'blue', marker='^', linewidth=2, label='Battery Charged (kWh)')
         ax2.plot(months, monthly_data['battery_discharge_kwh'], 'green', marker='v', linewidth=2, label='Battery Discharged (kWh)')
         ax2.plot(months, monthly_data['grid_import_kwh'] - monthly_data['grid_export_kwh'], 'cyan', marker='x', linestyle=':', linewidth=2, label='Grid Interaction (kWh)')
-        ax2.set_xlabel('Month')
         ax2.set_ylabel('Energy (kWh)')
         ax2.set_title('Monthly Energy Flows')
         ax2.set_xticks(months)
         ax2.set_xticklabels([month_names[m - 1] for m in months])
         ax2.grid(True, alpha=0.3)
         self._add_interactive_legend(ax2)
+        plt.setp(ax2.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # Subplot 3: Grid Interaction
         ax3.plot(months, monthly_data['grid_import_kwh'], 'orange', marker='o', linewidth=2, label='Grid Import (kWh)')
         ax3.plot(months, monthly_data['grid_export_kwh'], 'cyan', marker='s', linewidth=2, label='Grid Export (kWh)')
-        ax3.set_xlabel('Month')
         ax3.set_ylabel('Energy (kWh)')
         ax3.set_title('Grid Interaction')
         ax3.set_xticks(months)
         ax3.set_xticklabels([month_names[m - 1] for m in months])
         ax3.grid(True, alpha=0.3)
         self._add_interactive_legend(ax3)
+        plt.setp(ax3.get_xticklabels(), visible=False) # Hide x-tick labels
+
+        # Subplot 4: Average Energy Price
+        initial_monthly_prices = self.df[self.df['year'] == initial_year].groupby('month')['consumption_tariff'].mean()
+        l4_1, = ax4.plot(initial_monthly_prices.index, initial_monthly_prices.values, 'teal', marker='p', linewidth=2, label='Avg. Grid Buy Price (€/kWh)')
+        ax4.set_xlabel('Month')
+        ax4.set_ylabel('Price (€/kWh)')
+        ax4.set_title('Average Monthly Grid Buy Price')
+        ax4.set_xticks(months)
+        ax4.set_xticklabels([month_names[m - 1] for m in months])
+        ax4.grid(True, alpha=0.3)
+        self._add_interactive_legend(ax4)
 
         fig.suptitle(f'Year {initial_year} - Monthly Detail', fontsize=16, fontweight='bold')
 
         # Info text boxes
-        ax1_info = self._create_info_box(fig, [0.82, 0.70, 0.18, 0.15], color='lightyellow')
-        ax2_info = self._create_info_box(fig, [0.82, 0.40, 0.18, 0.20])
-        ax3_info = self._create_info_box(fig, [0.82, 0.10, 0.18, 0.15])
+        ax1_info = self._create_info_box(fig, [0.86, 0.75, 0.13, 0.15], color='lightyellow')
+        ax2_info = self._create_info_box(fig, [0.86, 0.50, 0.13, 0.20])
+        ax3_info = self._create_info_box(fig, [0.86, 0.28, 0.13, 0.15])
 
         def update_info_texts(data):
             # For ax1
             total_savings = data['monthly_savings'].sum()
-            info1_text = f"Total Savings:\n{total_savings:.2f} €"
+            info1_text = f"Total Savings:\n{self._format_number(total_savings)} €"
             ax1_info.set_text(info1_text)
 
             # For ax2
@@ -166,15 +214,13 @@ class GraphVisualizer:
             total_consumption = data['consumption_kwh'].sum()
             total_charge = data['battery_charge_kwh'].sum()
             total_discharge = data['battery_discharge_kwh'].sum()
-            total_grid_import = data['grid_import_kwh'].sum()
-            total_grid_export = data['grid_export_kwh'].sum()
             info2_text = (
                 f"Yearly Totals (kWh):\n"
                 f"------------------\n"
-                f"PV Generation: {total_solar:.2f}\n"
-                f"Consumption: {total_consumption:.2f}\n"
-                f"Battery Charge: {total_charge:.2f}\n"
-                f"Battery Discharge: {total_discharge:.2f}"
+                f"PV Generation: {self._format_number(total_solar)}\n"
+                f"Consumption: {self._format_number(total_consumption)}\n"
+                f"Battery Charge: {self._format_number(total_charge)}\n"
+                f"Battery Discharge: {self._format_number(total_discharge)}"
             )
             ax2_info.set_text(info2_text)
 
@@ -184,14 +230,15 @@ class GraphVisualizer:
             info3_text = (
                 f"Yearly Totals (kWh):\n"
                 f"------------------\n"
-                f"Grid Import: {total_grid_import:.2f}\n"
-                f"Grid Export: {total_grid_export:.2f}"
+                f"Grid Import: {self._format_number(total_grid_import)}\n"
+                f"Grid Export: {self._format_number(total_grid_export)}"
             )
-            ax2_info.set_text(info2_text)
+            ax3_info.set_text(info3_text)
 
         def update(year):
             year = int(year)
             monthly_data = self.analyzer.get_monthly_data(year)
+            monthly_prices = self.df[self.df['year'] == year].groupby('month')['consumption_tariff'].mean()
 
             fig.suptitle(f'Year {year} - Monthly Detail', fontsize=16, fontweight='bold')
 
@@ -215,6 +262,10 @@ class GraphVisualizer:
             ax3.relim()
             ax3.autoscale_view()
 
+            l4_1.set_ydata(monthly_prices.values)
+            ax4.relim()
+            ax4.autoscale_view()
+
             update_info_texts(monthly_data)
 
             fig.canvas.draw_idle()
@@ -236,11 +287,18 @@ class GraphVisualizer:
 
     def show_day_graph(self):
         """Single day detail (each hour is one point) with a date picker."""
-        fig, axes = plt.subplots(3, 1, figsize=(14, 10))
-        fig.subplots_adjust(top=0.88, bottom=0.1, hspace=0.5, right=0.8)
+        fig, axes = plt.subplots(4, 1, figsize=(14, 12))
+        fig.subplots_adjust(top=0.85, bottom=0.1, hspace=0.25, right=0.65) # Adjusted hspace and top
 
-        ax1, ax2, ax3 = axes
+        ax1, ax2, ax3, ax4 = axes
         ax2_pct = ax2.twinx()
+        
+        formatter = FuncFormatter(self._format_number)
+        ax1.yaxis.set_major_formatter(formatter)
+        ax2.yaxis.set_major_formatter(formatter)
+        ax2_pct.yaxis.set_major_formatter(formatter)
+        ax3.yaxis.set_major_formatter(formatter)
+        ax4.yaxis.set_major_formatter(formatter)
 
         initial_year, initial_month, initial_day = 1, 6, 15
 
@@ -252,20 +310,20 @@ class GraphVisualizer:
         l1_5, = ax1.plot([], [], 'cyan', marker='x', linestyle=':', linewidth=2, label='Grid Interaction (kW)')
         lines1 = [l1_1, l1_2, l1_3, l1_4, l1_5]
 
-        ax1.set_xlabel('Hour of Day')
         ax1.set_ylabel('Power (kW)')
         ax1.set_title('Hourly Power Flows')
         ax1.grid(True, alpha=0.3)
         ax1.set_xlim(-0.5, 23.5)
         ax1.set_xticks(range(0, 24, 2))
         self._add_interactive_legend(ax1)
+        plt.setp(ax1.get_xticklabels(), visible=False) # Hide x-tick labels
+
 
         # Subplot 2: Battery State
         l2_1, = ax2.plot([], [], 'purple', marker='D', linewidth=2, label='Battery SOC (kWh)')
         l2_2, = ax2_pct.plot([], [], 'magenta', marker='o', linewidth=2, linestyle='--', alpha=0.7,
                            label='Battery SOC (%)')
 
-        ax2.set_xlabel('Hour of Day')
         ax2.set_ylabel('Energy (kWh)', color='purple')
         ax2_pct.set_ylabel('State of Charge (%)', color='magenta')
         ax2.set_title('Battery State of Charge')
@@ -275,12 +333,13 @@ class GraphVisualizer:
         ax2.tick_params(axis='y', labelcolor='purple')
         ax2_pct.tick_params(axis='y', labelcolor='magenta')
         self._add_interactive_legend(ax2)
+        plt.setp(ax2.get_xticklabels(), visible=False) # Hide x-tick labels
+
 
         # Subplot 3: Savings
         l3_1, = ax3.plot([], [], 'brown', marker='D', linewidth=2, linestyle='--', label='Battery Savings (€/h)')
         l3_2, = ax3.plot([], [], 'm', marker='s', linewidth=2, linestyle=':', label='Expected Energy Cost (€/h)')
 
-        ax3.set_xlabel('Hour of Day')
         ax3.set_ylabel('Euros (€/h)')
         ax3.set_title('Hourly Costs and Savings')
         ax3.grid(True, alpha=0.3)
@@ -288,23 +347,40 @@ class GraphVisualizer:
         ax3.set_xticks(range(0, 24, 2))
         ax3.tick_params(axis='y', labelcolor='black')
         self._add_interactive_legend(ax3)
+        plt.setp(ax3.get_xticklabels(), visible=False) # Hide x-tick labels
+
+        # Subplot 4: Energy Prices
+        l4_1, = ax4.plot([], [], 'darkorange', marker='.', linewidth=2, label='Grid Buy Price (€/kWh)')
+        l4_2, = ax4.plot([], [], 'gray', linestyle='--', linewidth=2, label='Avg. Hourly Grid Buy Price for Year (€/kWh)')
+        ax4.set_xlabel('Hour of Day')
+        ax4.set_ylabel('Price (€/kWh)')
+        ax4.set_title('Hourly Grid Buy Prices')
+        ax4.grid(True, alpha=0.3)
+        ax4.set_xlim(-0.5, 23.5)
+        ax4.set_xticks(range(0, 24, 2))
+        self._add_interactive_legend(ax4)
 
         # Info text boxes
-        info_text_ax1 = fig.add_axes([0.82, 0.65, 0.18, 0.2])
+        info_text_ax1 = fig.add_axes([0.86, 0.7, 0.13, 0.2])
         info_text_ax1.axis('off')
         ax1_info = info_text_ax1.text(0, 0.5, '', va='center', fontsize=10,
                                       bbox=dict(boxstyle="round,pad=0.5", fc="aliceblue", ec="black", lw=1))
 
-        info_text_ax3 = fig.add_axes([0.82, 0.1, 0.18, 0.15])
+        info_text_ax3 = fig.add_axes([0.86, 0.1, 0.13, 0.15])
         info_text_ax3.axis('off')
         ax3_info = info_text_ax3.text(0, 0.5, '', va='center', fontsize=10,
                                       bbox=dict(boxstyle="round,pad=0.5", fc="lightyellow", ec="black", lw=1))
 
         def update(year, month, day):
             daily_data = self.analyzer.get_daily_data(year, month, day)
+            prices_for_day_df = self.df[
+                (self.df['year'] == year) &
+                (self.df['month'] == month) &
+                (self.df['day'] == day)
+            ]
 
-            if daily_data.empty:
-                for line in lines1 + [l2_1, l2_2, l3_1, l3_2]:
+            if daily_data.empty or prices_for_day_df.empty:
+                for line in lines1 + [l2_1, l2_2, l3_1, l3_2, l4_1, l4_2]:
                     line.set_data([], [])
                 fig.suptitle(f'No data for {year}-{month}-{day}', fontsize=16, fontweight='bold')
                 ax1_info.set_text('No data')
@@ -342,6 +418,13 @@ class GraphVisualizer:
             ax3.relim()
             ax3.autoscale_view()
 
+            # Update prices
+            avg_hourly_for_year = self.df[self.df['year'] == year].groupby('hour')['consumption_tariff'].mean()
+            l4_1.set_data(prices_for_day_df['hour'], prices_for_day_df['consumption_tariff'])
+            l4_2.set_data(avg_hourly_for_year.index, avg_hourly_for_year.values)
+            ax4.relim()
+            ax4.autoscale_view()
+
             # Update info text for ax1
             total_solar = daily_data['solar_generation_kw'].sum()
             total_consumption = daily_data['consumption_kw'].sum()
@@ -354,19 +437,19 @@ class GraphVisualizer:
             info1 = (
                 f"Daily Totals (kWh):\n"
                 f"------------------\n"
-                f"PV Generation: {total_solar:.2f}\n"
-                f"Consumption: {total_consumption:.2f}\n"
-                f"Battery Charge: {total_charge:.2f}\n"
-                f"Battery Discharge: {total_discharge:.2f}\n"
-                f"Grid Import: {total_grid_import:.2f}\n"
-                f"Grid Export: {total_grid_export:.2f}\n\n"
-                f"Total Savings: {total_savings:.2f} €"
+                f"PV Generation: {self._format_number(total_solar)}\n"
+                f"Consumption: {self._format_number(total_consumption)}\n"
+                f"Battery Charge: {self._format_number(total_charge)}\n"
+                f"Battery Discharge: {self._format_number(total_discharge)}\n"
+                f"Grid Import: {self._format_number(total_grid_import)}\n"
+                f"Grid Export: {self._format_number(total_grid_export)}\n\n"
+                f"Total Savings: {self._format_number(total_savings)} €"
             )
             ax1_info.set_text(info1)
 
             # Update info text for ax3
             total_savings = -daily_data['battery_flow_cost'].sum()
-            info3 = f"Total Savings:\n{total_savings:.2f} €"
+            info3 = f"Total Savings:\n{self._format_number(total_savings)} €"
             ax3_info.set_text(info3)
 
             fig.canvas.draw_idle()
@@ -434,7 +517,7 @@ class GraphVisualizer:
         # Map labels to their original artists (handles)
         label_to_artist_map = {label: handle for handle, label in zip(handles, labels)}
 
-        legend = ax.legend(handles, labels)
+        legend = ax.legend(handles, labels, loc='center left', bbox_to_anchor=(1.02, 0.5))
 
         if not hasattr(fig, 'legend_artist_map'):
             fig.legend_artist_map = {}
@@ -490,7 +573,7 @@ class GraphVisualizer:
                     # From lines
                     for line in ax.get_lines():
                         if line.get_visible():
-                            y_data = line.get_ydata()
+                            y_data = np.asarray(line.get_ydata())
                             if y_data.size > 0:
                                 all_y_data.append(y_data)
 
@@ -510,8 +593,8 @@ class GraphVisualizer:
                         if flat_y.size > 0:
                             min_y, max_y = np.min(flat_y), np.max(flat_y)
                             margin = (max_y - min_y) * 0.1
-                            if margin == 0:
-                                margin = 1.0  # Handle single point or horizontal line
+                            if margin == 0: # Handle single point or horizontal line
+                                margin = 1.0  
                             
                             ax.set_ylim(min_y - margin, max_y + margin)
                         else:
