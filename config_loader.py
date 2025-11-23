@@ -59,6 +59,7 @@ class SolarConfig:
     """Solar PV configuration"""
     yearly_generation_kwh: float  # Total kWh per year
     degradation_rate: float  # % per year
+    overcast_enabled: bool # Enable/disable overcast simulation
 
 
 @dataclass
@@ -95,6 +96,11 @@ class ConfigLoader:
         """Get float value from config"""
         value_str = self.parser.get(section, key)
         return float(value_str.split('#')[0].strip())
+
+    def _get_bool(self, section: str, key: str) -> bool:
+        """Get boolean value from config"""
+        value_str = self.parser.get(section, key)
+        return value_str.split('#')[0].strip().lower() == 'true'
 
     def _get_int(self, section: str, key: str) -> int:
         """Get int value from config"""
@@ -161,7 +167,8 @@ class ConfigLoader:
         """Load solar configuration"""
         return SolarConfig(
             yearly_generation_kwh=self._get_float('Solar', 'yearly_generation_kwh'),
-            degradation_rate=self._get_float('Solar', 'degradation_rate_percent')
+            degradation_rate=self._get_float('Solar', 'degradation_rate_percent'),
+            overcast_enabled=self._get_bool('Solar', 'overcast_enabled')
         )
     
     def _load_battery(self) -> BatteryConfig:

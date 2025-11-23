@@ -105,19 +105,30 @@ class BatterySimulator:
     def _create_solar_profile(self) -> np.ndarray:
         """
         Creates a realistic hourly solar generation profile for a typical year
-        using pvlib, scaled to the configured yearly generation.
+        using pvlib, scaled to the configured yearly generation. Includes an
+        optional overcast simulation for more realistic daily and seasonal variations.
+
+        The overcast simulation can be configured via the [solar] section in config.ini:
+        - overcast_enabled (bool, default: True): Enable/disable the feature.
+        - overcast_events_per_year (int, default: 150): Number of cloudy periods per year.
+        - overcast_min_duration_hours (int, default: 1): Min duration of a cloudy period.
+        - overcast_max_duration_hours (int, default: 72): Max duration of a cloudy period.
+        - overcast_min_factor (float, default: 0.1): Min solar output during overcast (e.g., 0.1 = 10% of clear sky).
+        - overcast_max_factor (float, default: 0.5): Max solar output during overcast.
+        - overcast_seasonal_variation (bool, default: True): Makes clouds more likely in winter.
         """
         # Location for the Netherlands (Utrecht)
         latitude = 52.09
         longitude = 5.12
         
-        # Create a full year of hourly timestamps
+        # Create a full year of hourly timestamps for a non-leap year
         times = pd.date_range(
             start="2025-01-01",
             end="2025-12-31 23:00",
             freq="h",
             tz="Europe/Amsterdam"
         )
+        hours_in_year = len(times)
         
         # Create a location object
         location = pvlib.location.Location(latitude, longitude, tz="Europe/Amsterdam")
@@ -126,23 +137,77 @@ class BatterySimulator:
         solar_position = location.get_solarposition(times)
         
         # Use a clear-sky model to get irradiance (GHI)
-        # This gives a realistic shape to the generation curve
         clearsky = location.get_clearsky(times)
-        
-        # We use GHI as a proxy for panel generation potential.
-        # A more complex model would include panel tilt, orientation, etc.
-        # For this simulation, GHI provides a good enough daily/seasonal shape.
-        # We set negative GHI values to 0 (night time)
         ghi = clearsky['ghi'].clip(lower=0)
-        
+
+        # --- Overcast Simulation ---
+        overcast_enabled = getattr(self.config.solar, 'overcast_enabled', True)
+        if overcast_enabled:
+            num_events = int(getattr(self.config.solar, 'overcast_events_per_year', 150))
+            min_duration = int(getattr(self.config.solar, 'overcast_min_duration_hours', 1))
+            max_duration = int(getattr(self.config.solar, 'overcast_max_duration_hours', 72))
+            min_factor = float(getattr(self.config.solar, 'overcast_min_factor', 0.1))
+            max_factor = float(getattr(self.config.solar, 'overcast_max_factor', 0.5))
+            seasonal_variation = getattr(self.config.solar, 'overcast_seasonal_variation', True)
+
+            overcast_profile = np.ones(hours_in_year)
+            
+            if seasonal_variation:
+                days = np.arange(365)
+                # Cosine curve peaking in winter (around mid-Jan, day 15)
+                seasonal_p = 1.5 + np.cos(2 * np.pi * (days - 15) / 365)
+                hourly_p = np.repeat(seasonal_p, 24)
+                if len(hourly_p) != hours_in_year: # Should not happen with 365 days
+                    hourly_p = np.resize(hourly_p, hours_in_year)
+                hourly_p /= hourly_p.sum()
+            else:
+                hourly_p = None
+
+            for _ in range(num_events):
+                duration = np.random.randint(min_duration, max_duration + 1)
+                
+                max_start_hour = hours_in_year - duration
+                if max_start_hour < 0: continue
+
+                if seasonal_variation:
+                    possible_starts = np.arange(max_start_hour + 1)
+                    p_subset = hourly_p[:max_start_hour + 1]
+                    p_subset /= p_subset.sum()
+                    start_hour = np.random.choice(possible_starts, p=p_subset)
+                else:
+                    start_hour = np.random.randint(0, max_start_hour + 1)
+                
+                end_hour = start_hour + duration
+                factor = np.random.uniform(min_factor, max_factor)
+                
+                fade_duration = min(duration // 4, 12)
+                event_profile = np.full(duration, factor)
+                
+                if fade_duration > 0:
+                    fade_in = np.linspace(1.0, factor, fade_duration)
+                    fade_out = np.linspace(factor, 1.0, fade_duration)
+                    event_profile[:fade_duration] = fade_in
+                    event_profile[-fade_duration:] = fade_out
+
+                overcast_profile[start_hour:end_hour] = np.minimum(
+                    overcast_profile[start_hour:end_hour],
+                    event_profile
+                )
+
+            # Apply the overcast profile to the clear-sky generation
+            ghi = ghi * overcast_profile
+
+        # --- Renormalization to match yearly total ---
         # The raw GHI is in W/m^2. We need to scale it to match the
-        # total configured yearly generation in kWh.
+        # total configured yearly generation in kWh. The total is based on
+        # the (potentially cloudy) profile.
         total_ghi_yearly = ghi.sum()
         
-        # Scale factor to convert GHI (W/m^2) to kWh for the whole system
-        # The total energy is the sum of hourly power values
-        scaling_factor = self.config.solar.yearly_generation_kwh / total_ghi_yearly
-        
+        if total_ghi_yearly > 1e-6:
+            scaling_factor = self.config.solar.yearly_generation_kwh / total_ghi_yearly
+        else:
+            scaling_factor = 0
+            
         # The final profile is in kWh per hour (which is kW)
         solar_profile_kw = ghi * scaling_factor
         
