@@ -143,11 +143,13 @@ class BatterySimulator:
         # --- Overcast Simulation ---
         overcast_enabled = getattr(self.config.solar, 'overcast_enabled', True)
         if overcast_enabled:
-            num_events = int(getattr(self.config.solar, 'overcast_events_per_year', 150))
-            min_duration = int(getattr(self.config.solar, 'overcast_min_duration_hours', 1))
-            max_duration = int(getattr(self.config.solar, 'overcast_max_duration_hours', 72))
-            min_factor = float(getattr(self.config.solar, 'overcast_min_factor', 0.1))
-            max_factor = float(getattr(self.config.solar, 'overcast_max_factor', 0.5))
+            # Parameters for overcast simulation, with realistic defaults for the Netherlands.
+            # These can be overridden in config.ini under the [Solar] section.
+            num_events = int(getattr(self.config.solar, 'overcast_events_per_year', 200))
+            min_duration = int(getattr(self.config.solar, 'overcast_min_duration_hours', 2))
+            max_duration = int(getattr(self.config.solar, 'overcast_max_duration_hours', 96))
+            min_factor = float(getattr(self.config.solar, 'overcast_min_factor', 0.05))
+            max_factor = float(getattr(self.config.solar, 'overcast_max_factor', 0.6))
             seasonal_variation = getattr(self.config.solar, 'overcast_seasonal_variation', True)
 
             overcast_profile = np.ones(hours_in_year)
