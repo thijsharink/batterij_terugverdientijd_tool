@@ -55,7 +55,13 @@ def main():
         print(f"\n✗ Payback not achieved within {config.simulation_years} years")
         print(f"  → Still need: €{config.battery_investment - analysis.total_savings:,.2f}")
     
-    print(f"\nTotal PV Generated: {analysis.total_pv_generated:,.0f} kWh")
+    total_curtailment = analysis.total_available_pv_generated - analysis.total_pv_generated
+    curtailment_percent = (total_curtailment / analysis.total_available_pv_generated * 100) if analysis.total_available_pv_generated > 0 else 0
+    print(f"\nTotal Available PV: {analysis.total_available_pv_generated:,.0f} kWh")
+    print(f"Total Actual PV Generated: {analysis.total_pv_generated:,.0f} kWh")
+    if total_curtailment > 0:
+        print(f"  (Curtailment: {total_curtailment:,.0f} kWh, {curtailment_percent:.1f}%)")
+
     print(f"Total Battery Charged: {analysis.total_battery_charged:,.0f} kWh")
     print(f"Total Battery Discharged: {analysis.total_battery_discharged:,.0f} kWh")
     print(f"Battery Round-trip Efficiency: {analysis.battery_efficiency:.1f}%")
@@ -65,8 +71,14 @@ def main():
     # Visualize
     print("\n[4/4] Generating visualizations...")
     visualizer = GraphVisualizer(config, results, analysis)
-    visualizer.show_all()
-    print("\n✓ Complete! Close graph windows to exit.")
+    try:
+        visualizer.show_all()
+        print("\n✓ Complete! Close graph windows to exit.")
+    except KeyboardInterrupt:
+        print("\nVisualization interrupted by user. Exiting gracefully.")
+    except Exception as e:
+        print(f"\nAn error occurred during visualization: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

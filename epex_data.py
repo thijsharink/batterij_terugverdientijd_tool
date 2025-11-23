@@ -64,8 +64,6 @@ class EpexProjector:
         # Convert price from EUR/MWh to EUR/kWh
         df['price_eur_kwh'] = df['Price (EUR/MWhe)'] / 1000
         
-        # Handle potential negative prices, floor at a small positive value
-        df['price_eur_kwh'] = df['price_eur_kwh'].apply(lambda x: max(x, 0.001))
         
         # Add columns for grouping
         df['month'] = df.index.month

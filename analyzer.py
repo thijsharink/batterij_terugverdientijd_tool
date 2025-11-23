@@ -21,6 +21,7 @@ class PaybackAnalysis:
     
     # Additional statistics
     total_pv_generated: float  # kWh
+    total_available_pv_generated: float # kWh
     total_battery_charged: float  # kWh
     total_battery_discharged: float  # kWh
     battery_efficiency: float  # Round-trip efficiency %
@@ -35,6 +36,15 @@ class PaybackAnalyzer:
         self.config = config
         self.results = results
         self.df = results.to_dataframe()
+
+        # Positive = importing, zero otherwise
+        self.df['grid_import_kwh'] = self.df['grid_flow_kw'].clip(lower=0)
+        # Positive = exporting, zero otherwise
+        self.df['grid_export_kwh'] = self.df['grid_flow_kw'].clip(upper=0).abs()
+        # Positive = charging, zero otherwise
+        self.df['battery_charge_kwh'] = self.df['battery_flow_kw'].clip(upper=0).abs()
+        # Positive = discharging, zero otherwise
+        self.df['battery_discharge_kwh'] = self.df['battery_flow_kw'].clip(lower=0)
     
     def analyze(self) -> PaybackAnalysis:
         """Perform complete payback analysis"""
@@ -57,8 +67,9 @@ class PaybackAnalyzer:
         # Calculate statistics
         total_savings = self.df['cumulative_savings'].iloc[-1]
         total_pv = self.df['solar_generation_kw'].sum()
-        total_charged = self.df['battery_charge_kw'].sum()
-        total_discharged = self.df['battery_discharge_kw'].sum()
+        total_available_pv = self.df['available_solar_kw'].sum()
+        total_charged = self.df[self.df['battery_flow_kw'] < 0]['battery_flow_kw'].sum() * -1
+        total_discharged = self.df[self.df['battery_flow_kw'] > 0]['battery_flow_kw'].sum()
         
         # Round-trip efficiency (energy out / energy in)
         battery_eff = (total_discharged / total_charged * 100) if total_charged > 0 else 0
@@ -79,6 +90,7 @@ class PaybackAnalyzer:
             payback_year=payback_year,
             payback_month=payback_month,
             total_pv_generated=total_pv,
+            total_available_pv_generated=total_available_pv,
             total_battery_charged=total_charged,
             total_battery_discharged=total_discharged,
             battery_efficiency=battery_eff,
@@ -89,16 +101,24 @@ class PaybackAnalyzer:
     def get_yearly_data(self):
         """Aggregate data by year"""
         yearly = self.df.groupby('year').agg({
+            'available_solar_kw': 'sum',
             'solar_generation_kw': 'sum',
             'consumption_kw': 'sum',
-            'battery_charge_kw': 'sum',
-            'battery_discharge_kw': 'sum',
-            'grid_import_kw': 'sum',
-            'grid_export_kw': 'sum',
+            'grid_import_kwh': 'sum',
+            'grid_export_kwh': 'sum',
+            'battery_charge_kwh': 'sum',
+            'battery_discharge_kwh': 'sum',
             'battery_flow_cost': 'sum',
             'grid_flow_cost': 'sum',
             'battery_capacity_kwh': 'first',  # Capacity at start of year
         }).reset_index()
+
+        # Rename columns for consistency
+        yearly.rename(columns={
+            'available_solar_kw': 'available_solar_kwh',
+            'solar_generation_kw': 'solar_generation_kwh',
+            'consumption_kw': 'consumption_kwh'
+        }, inplace=True)
         
         # Calculate cumulative savings per year
         yearly['annual_savings'] = -yearly['battery_flow_cost']
@@ -107,13 +127,6 @@ class PaybackAnalyzer:
         # Calculate total balance (investment + cumulative savings)
         yearly['total_balance'] = yearly['cumulative_savings'] - self.config.battery_investment
         
-        # Convert kW*hours to kWh
-        energy_cols = ['solar_generation_kw', 'consumption_kw', 'battery_charge_kw',
-                      'battery_discharge_kw', 'grid_import_kw', 'grid_export_kw']
-        for col in energy_cols:
-            yearly[col.replace('_kw', '_kwh')] = yearly[col]
-            yearly = yearly.drop(columns=[col])
-        
         return yearly
     
     def get_monthly_data(self, year: int):
@@ -121,25 +134,26 @@ class PaybackAnalyzer:
         year_data = self.df[self.df['year'] == year]
         
         monthly = year_data.groupby('month').agg({
+            'available_solar_kw': 'sum',
             'solar_generation_kw': 'sum',
             'consumption_kw': 'sum',
-            'battery_charge_kw': 'sum',
-            'battery_discharge_kw': 'sum',
-            'grid_import_kw': 'sum',
-            'grid_export_kw': 'sum',
+            'grid_import_kwh': 'sum',
+            'grid_export_kwh': 'sum',
+            'battery_charge_kwh': 'sum',
+            'battery_discharge_kwh': 'sum',
             'battery_flow_cost': 'sum',
             'grid_flow_cost': 'sum',
             'battery_capacity_kwh': 'first',
         }).reset_index()
+
+        # Rename columns for consistency
+        monthly.rename(columns={
+            'available_solar_kw': 'available_solar_kwh',
+            'solar_generation_kw': 'solar_generation_kwh',
+            'consumption_kw': 'consumption_kwh'
+        }, inplace=True)
         
         monthly['monthly_savings'] = -monthly['battery_flow_cost']
-        
-        # Convert to kWh
-        energy_cols = ['solar_generation_kw', 'consumption_kw', 'battery_charge_kw',
-                      'battery_discharge_kw', 'grid_import_kw', 'grid_export_kw']
-        for col in energy_cols:
-            monthly[col.replace('_kw', '_kwh')] = monthly[col]
-            monthly = monthly.drop(columns=[col])
         
         return monthly
     

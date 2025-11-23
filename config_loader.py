@@ -15,18 +15,18 @@ class StaticTariffConfig:
     """Static energy tariff configuration"""
     day_rate: float
     night_rate: float
-    feed_in_rate: float
+    export_rate: float
     day_start_hour: int
     day_end_hour: int
     day_rate_increase: float
     night_rate_increase: float
-    feed_in_rate_increase_percent: float
+    export_rate_increase_percent: float
 
 @dataclass
 class DynamicTariffConfig:
     """Dynamic energy tariff configuration"""
     trader_fee: float
-    feed_in_fee: float
+    export_fee: float
     epex_price_increase_percent: float
     epex_country: str
     epex_start_date: str
@@ -118,12 +118,12 @@ class ConfigLoader:
             static_config = StaticTariffConfig(
                 day_rate=self._get_float('TariffStatic', 'day_rate'),
                 night_rate=self._get_float('TariffStatic', 'night_rate'),
-                feed_in_rate=self._get_float('TariffStatic', 'feed_in_rate'),
+                export_rate=self._get_float('TariffStatic', 'export_rate'),
                 day_start_hour=self._get_int('TariffStatic', 'day_start_hour'),
                 day_end_hour=self._get_int('TariffStatic', 'day_end_hour'),
                 day_rate_increase=self._get_float('TariffStatic', 'day_rate_increase_percent'),
                 night_rate_increase=self._get_float('TariffStatic', 'night_rate_increase_percent'),
-                feed_in_rate_increase_percent=self._get_float('TariffStatic', 'feed_in_rate_increase_percent'),
+                export_rate_increase_percent=self._get_float('TariffStatic', 'export_rate_increase_percent'),
             )
         elif tariff_type == 'dynamic':
             # Check if section exists
@@ -132,7 +132,7 @@ class ConfigLoader:
             
             dynamic_config = DynamicTariffConfig(
                 trader_fee=self._get_float('TariffDynamic', 'trader_fee'),
-                feed_in_fee=self._get_float('TariffDynamic', 'feed_in_fee'),
+                export_fee=self._get_float('TariffDynamic', 'export_fee'),
                 epex_price_increase_percent=self._get_float('TariffDynamic', 'epex_price_increase_percent'),
                 epex_country=self._get_str('TariffDynamic', 'epex_country', fallback='Netherlands'),
                 epex_start_date=self._get_str('TariffDynamic', 'epex_start_date'),
@@ -197,7 +197,7 @@ class ConfigLoader:
             print(f"  Night rate: €{self.tariff.static.night_rate:.4f}/kWh")
         else:
             print(f"  Trader fee: €{self.tariff.dynamic.trader_fee:.4f}/kWh")
-            print(f"  Feed-in fee: €{self.tariff.dynamic.feed_in_fee:.4f}/kWh (additional)")
+            print(f"  Feed-in fee: €{self.tariff.dynamic.export_fee:.4f}/kWh (additional)")
             print(f"  EPEX price increase: {self.tariff.dynamic.epex_price_increase_percent:.2f}% per year")
             print(f"  EPEX data source: {self.tariff.dynamic.epex_country}.csv")
             print(f"  EPEX data window: {self.tariff.dynamic.epex_start_date} to {self.tariff.dynamic.epex_stop_date}")

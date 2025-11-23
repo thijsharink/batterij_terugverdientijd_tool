@@ -25,11 +25,10 @@ class HourlyData:
     
     # Energy flows (kW)
     solar_generation_kw: float
+    available_solar_kw: float
     consumption_kw: float
-    battery_charge_kw: float  # Positive = charging
-    battery_discharge_kw: float  # Positive = discharging
-    grid_import_kw: float  # Positive = buying from grid
-    grid_export_kw: float  # Positive = selling to grid
+    battery_flow_kw: float  # Negative = charging, Positive = discharging
+    grid_flow_kw: float  # Positive = buying from grid (import), Negative = selling to grid (export)
     
     # Battery state
     battery_soc_kwh: float  # State of charge in kWh
@@ -38,7 +37,8 @@ class HourlyData:
     
     # Tariffs (€/kWh)
     consumption_tariff: float  # What we pay for consumption
-    export_tariff: float  # What we get for export (negative)
+    export_revenue: float  # What we get for export
+    raw_epex_price: float
     
     # Costs (€)
     battery_flow_cost: float  # Cost of energy flowing through battery
@@ -186,12 +186,14 @@ class BatterySimulator:
         battery_capacity_kwh = self._get_current_battery_capacity(timestamp)
 
         # Get solar generation for this hour from the pre-calculated profile
-        solar_generation_kw = self.solar_profile_kwh[hour_of_year]
+        available_solar_kw = self.solar_profile_kwh[hour_of_year]
         
         # Apply degradation to solar generation
         degradation_factor = (1 - self.config.solar.degradation_rate / 100) ** (year_num - 1)
-        solar_generation_kw *= degradation_factor
+        available_solar_kw *= degradation_factor
         
+        solar_generation_kw = available_solar_kw
+
         # Consumption
         consumption_kw = self.consumption_profile_kw[hour_of_year]
 
@@ -199,8 +201,7 @@ class BatterySimulator:
         net_power_kw = solar_generation_kw - consumption_kw
         
         # Battery operation (simple strategy: balance to zero)
-        battery_charge_kw = 0.0
-        battery_discharge_kw = 0.0
+        battery_flow_kw = 0.0 # Negative = charging, Positive = discharging
         
         if net_power_kw > 0:
             # Excess solar -> charge battery
@@ -209,11 +210,11 @@ class BatterySimulator:
                 battery_capacity_kwh - self.battery_soc_kwh,  # Available capacity
                 self.config.battery.max_power_kw  # Max charge power
             )
-            battery_charge_kw = max_charge_kw
+            battery_flow_kw = -max_charge_kw # Negative for charging
             
             # Apply charging losses
             charge_efficiency = 1 - (self.config.battery.charge_loss / 100)
-            self.battery_soc_kwh += battery_charge_kw * charge_efficiency
+            self.battery_soc_kwh += max_charge_kw * charge_efficiency
         
         elif net_power_kw < 0 and self.battery_soc_kwh > 0:
             # Deficit -> discharge battery
@@ -227,47 +228,57 @@ class BatterySimulator:
             max_deliverable_kw_from_soc = self.battery_soc_kwh * discharge_efficiency
             
             # Determine the actual power we will *deliver* to the load
-            battery_discharge_kw = min(
+            actual_discharge_kw = min(
                 needed_kw,                          # What the load needs
                 self.config.battery.max_power_kw,   # Max power of the inverter
                 max_deliverable_kw_from_soc         # Max power the battery can *deliver*
             )
+            battery_flow_kw = actual_discharge_kw # Positive for discharging
             
             # Apply discharge losses
-            # To *deliver* `battery_discharge_kw`, we must *drain*
-            # `battery_discharge_kw / discharge_efficiency` from the stored energy.
             if discharge_efficiency > 1e-6: # Avoid division by zero
-                self.battery_soc_kwh -= battery_discharge_kw / discharge_efficiency
-            elif battery_discharge_kw > 0:
-                # If efficiency is 0% and we're trying to discharge, just drain it all
+                self.battery_soc_kwh -= actual_discharge_kw / discharge_efficiency
+            elif actual_discharge_kw > 0:
                 self.battery_soc_kwh = 0
             
-            # Add this line here (after discharge calculation and SOC update)
-            self.cumulative_discharged_kwh += battery_discharge_kw
+            self.cumulative_discharged_kwh += actual_discharge_kw
         
         # Ensure SOC stays within bounds
         self.battery_soc_kwh = np.clip(self.battery_soc_kwh, 0, battery_capacity_kwh)
         
         # Calculate final grid flows
-        net_after_battery = net_power_kw - battery_charge_kw + battery_discharge_kw
-        grid_import_kw = max(0, -net_after_battery)
-        grid_export_kw = max(0, net_after_battery)
+        # net_after_battery is the remaining power after battery interaction.
+        # If battery_flow_kw is negative (charging), it removes from net_power_kw.
+        # If battery_flow_kw is positive (discharging), it adds to net_power_kw (reducing deficit).
+        net_after_battery = net_power_kw + battery_flow_kw # net_power_kw - charging + discharging
         
+        # grid_flow_kw: Positive = import, Negative = export
+        grid_flow_kw = -net_after_battery # If net_after_battery > 0 (export), grid_flow_kw is negative. If net_after_battery < 0 (import), grid_flow_kw is positive.
+
         # Calculate tariffs
         consumption_tariff = self._get_consumption_tariff(timestamp, year_num)
-        export_tariff = self._get_export_tariff(timestamp, year_num)
+        export_revenue = self._get_export_revenue(timestamp, year_num)
+        raw_epex_price = self._get_epex_price_for_timestamp(timestamp, year_num)
         
-        # Calculate battery flow cost
+        # Curtailment logic
+        if grid_flow_kw < 0 and export_revenue < 0:
+            # Paying to export, so curtail solar generation
+            curtailment_kw = abs(grid_flow_kw)
+            solar_generation_kw -= curtailment_kw
+            grid_flow_kw = 0.0
+
+        # Calculate battery flow cost (using actual charge/discharge for clarity in this function)
         battery_flow_cost = self._calculate_battery_flow_cost(
-            battery_charge_kw,
-            battery_discharge_kw,
-            export_tariff,
-            consumption_tariff
+            battery_flow_kw,
+            export_revenue,
+            consumption_tariff,
         )
 
-        # Cost of energy flowing from/to the grid.
-        # Positive = cost (import), Negative = revenue (export)
-        grid_flow_cost = (grid_import_kw * consumption_tariff) + (grid_export_kw * export_tariff)
+        grid_flow_cost = self._calculate_grid_flow_cost(
+            grid_flow_kw,
+            export_revenue,
+            consumption_tariff,
+        )
 
         return HourlyData(
             timestamp=timestamp,
@@ -276,16 +287,16 @@ class BatterySimulator:
             day=day,
             hour=hour_of_day,
             solar_generation_kw=solar_generation_kw,
+            available_solar_kw=available_solar_kw,
             consumption_kw=consumption_kw,
-            battery_charge_kw=battery_charge_kw,
-            battery_discharge_kw=battery_discharge_kw,
-            grid_import_kw=grid_import_kw,
-            grid_export_kw=grid_export_kw,
+            battery_flow_kw=battery_flow_kw, # New field
+            grid_flow_kw=grid_flow_kw,     # New field
             battery_soc_kwh=self.battery_soc_kwh,
             battery_soc_percent=(self.battery_soc_kwh / battery_capacity_kwh * 100) if battery_capacity_kwh > 0 else 0,
             battery_capacity_kwh=battery_capacity_kwh,
             consumption_tariff=consumption_tariff,
-            export_tariff=export_tariff,
+            export_revenue=export_revenue,
+            raw_epex_price=raw_epex_price,
             battery_flow_cost=battery_flow_cost,
             grid_flow_cost=grid_flow_cost
         )
@@ -312,6 +323,16 @@ class BatterySimulator:
         retention = (1 - cycle_fade_fraction) * (1 - calendar_fade_fraction)
         return max(0.0, self.initial_battery_capacity_kwh * retention)
 
+    def _get_epex_price_for_timestamp(self, timestamp: datetime, year_num: int) -> float:
+        """Gets the projected EPEX price for a given timestamp, including yearly increase."""
+        if self.config.tariff.tariff_type != 'dynamic' or not self.epex_projector:
+            return 0.0
+
+        base_epex_price = self.epex_projector.get_epex_price(timestamp)
+        epex_increase = self.config.tariff.dynamic.epex_price_increase_percent
+        epex_price = base_epex_price * (1 + epex_increase / 100) ** (year_num - 1)
+        return epex_price
+
     def _get_consumption_tariff(self, timestamp: datetime, year_num: int) -> float:
         """
         Get tariff for consuming from grid (€/kWh)
@@ -336,11 +357,7 @@ class BatterySimulator:
         
         elif self.config.tariff.tariff_type == 'dynamic':
             # Get projected EPEX price
-            base_epex_price = self.epex_projector.get_epex_price(timestamp)
-            
-            # Apply yearly increase
-            epex_increase = self.config.tariff.dynamic.epex_price_increase_percent
-            epex_price = base_epex_price * (1 + epex_increase / 100) ** (year_num - 1)
+            epex_price = self._get_epex_price_for_timestamp(timestamp, year_num)
             
             # Total consumption cost
             trader_fee = self.config.tariff.dynamic.trader_fee
@@ -349,66 +366,77 @@ class BatterySimulator:
         else:
             raise NotImplementedError(f"Tariff type '{self.config.tariff.tariff_type}' not implemented.")
 
-    def _get_export_tariff(self, timestamp: datetime, year_num: int) -> float:
+    def _get_export_revenue(self, timestamp: datetime, year_num: int) -> float:
         """
-        Get tariff for exporting to grid (€/kWh)
-        NEGATIVE value = we receive this
+        Get revenue for exporting to grid (€/kWh)
+        returns positive if revenue, negative when we have to pay to export.
         """
         if self.config.tariff.tariff_type == 'static':
             # Base rate for feedback
-            base_rate = self.config.tariff.static.feed_in_rate
-            rate_increase = self.config.tariff.static.feed_in_rate_increase_percent
+            base_rate = self.config.tariff.static.export_rate
+            rate_increase = self.config.tariff.static.export_rate_increase_percent
             
             # Apply yearly increases
             rate = base_rate * (1 + rate_increase / 100) ** (year_num - 1)
-            return -rate
+            return rate
             
         elif self.config.tariff.tariff_type == 'dynamic':
             # Get projected EPEX price
-            base_epex_price = self.epex_projector.get_epex_price(timestamp)
-            
-            # Apply yearly increase
-            epex_increase = self.config.tariff.dynamic.epex_price_increase_percent
-            epex_price = base_epex_price * (1 + epex_increase / 100) ** (year_num - 1)
+            epex_price = self._get_epex_price_for_timestamp(timestamp, year_num)
             
             # Total export revenue
             trader_fee = self.config.tariff.dynamic.trader_fee
-            feed_in_fee = self.config.tariff.dynamic.feed_in_fee
+            export_fee = self.config.tariff.dynamic.export_fee
             
-            # Revenue is what's left after fees. Return as negative for "revenue".
-            revenue = epex_price - trader_fee - feed_in_fee
-            return -revenue
+            # Revenue is what's left after fees.
+            revenue = epex_price - trader_fee - export_fee
+            return revenue
             
         else:
             raise NotImplementedError(f"Tariff type '{self.config.tariff.tariff_type}' not implemented.")
     
     def _calculate_battery_flow_cost(
         self,
-        charge_kw: float,
-        discharge_kw: float,
-        export_tariff: float,
-        consumption_tariff: float
+        battery_flow_kw: float, # Negative = charging, Positive = discharging
+        export_revenue: float,
+        consumption_tariff: float,
     ) -> float:
         """
-        Calculate cost/savings from battery operation this hour
-        
-        When charging: opportunity cost = what we would have earned from export
-        When discharging: savings = what we would have paid for import
+        Calculate cost/savings from battery operation this hour.
         
         Returns:
             Positive = cost (when charging)
             Negative = savings (when discharging)
         """
+        # When charging (negative flow), the cost is the opportunity cost of not exporting.
+        # However, if export revenue is negative (i.e., we pay to export), we would have
+        # curtailed anyway, so the opportunity cost is zero.
+        is_charging = battery_flow_kw < 0
+        if is_charging and self.config.tariff.tariff_type == 'dynamic' and export_revenue < 0:
+            return 0.0
+
+        # For all other cases (discharging, or charging with non-negative export revenue),
+        # the value of the battery flow is the same as if that energy had passed through the grid.
+        return -self._calculate_grid_flow_cost(battery_flow_kw, export_revenue, consumption_tariff)
+    
+    def _calculate_grid_flow_cost(
+        self,
+        grid_flow_kw: float, # Negative = exporting, Positive = consuming
+        export_revenue: float,
+        consumption_tariff: float,
+    ) -> float:
+        """
+        Calculate cost/savings from grid energy flow this hour.
+        
+        Returns:
+            Positive = cost (when consuming)
+            Negative = revenue (when exporting)
+        """
         cost = 0.0
-        
-        if charge_kw > 0:
-            # Charging: opportunity cost of not exporting
-            # export_tariff is negative, so -export_tariff is positive cost
-            cost += charge_kw * (-export_tariff)
-        
-        if discharge_kw > 0:
-            # Discharging: savings from not importing
-            # consumption_tariff is positive, so this is negative (savings)
-            cost -= discharge_kw * consumption_tariff
-        
+
+        if grid_flow_kw < 0:
+            cost = grid_flow_kw * export_revenue
+        #if discharging
+        if grid_flow_kw > 0:
+            cost = grid_flow_kw * consumption_tariff
         return cost
