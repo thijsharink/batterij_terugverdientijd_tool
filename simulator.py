@@ -89,18 +89,68 @@ class BatterySimulator:
     
     def _create_consumption_profile(self) -> np.ndarray:
         """
-        Creates a constant hourly consumption profile for a typical year,
+        Creates a realistic hourly consumption profile for a typical year,
         scaled to the configured yearly energy usage.
+
+        This profile includes:
+        - Seasonal variation (higher in summer, lower in winter).
+        - Daily variation (higher during the day, lower at night).
+
+        The variations are controlled by parameters in the [Consumption] section
+        of config.ini.
         """
-        # A year has 8760 hours (365 * 24) or 8784 in a leap year (366 * 24)
-        # For simplicity, we'll use 8760 hours for the base profile,
-        # and handle leap year adjustments in _simulate_hour if necessary.
         hours_in_year = 365 * 24
         
-        # Distribute yearly energy usage evenly across all hours
-        hourly_consumption_kw = self.config.consumption.yearly_energy_usage_kwh / hours_in_year
+        # Base profile of 1s, representing the average
+        profile = np.ones(hours_in_year)
         
-        return np.full(hours_in_year, hourly_consumption_kw)
+        # --- 1. Seasonal Variation ---
+        s_var = self.config.consumption.seasonal_variation_percent / 100
+        if s_var > 0:
+            # Use a cosine wave that peaks in summer (around mid-July, day ~196)
+            days = np.arange(365)
+            # cos is 1 at peak, -1 at trough. We scale it by s_var/2.
+            seasonal_multiplier = 1 + (s_var / 2) * np.cos(2 * np.pi * (days - 196) / 365)
+            profile *= np.repeat(seasonal_multiplier, 24)
+
+        # --- 2. Daily Variation ---
+        d_var = self.config.consumption.daily_variation_percent / 100
+        if d_var > 0:
+            day_start = self.config.consumption.day_start_hour
+            day_end = self.config.consumption.day_end_hour
+            day_hours = day_end - day_start
+            night_hours = 24 - day_hours
+
+            # We want day_multiplier - night_multiplier = d_var
+            # and day_hours * day_multiplier + night_hours * night_multiplier = 24
+            # Solving this gives:
+            night_multiplier = 1 - (d_var * day_hours / 24)
+            day_multiplier = 1 + (d_var * night_hours / 24)
+
+            # Create a 24h daily profile shape
+            daily_multipliers_hourly = np.full(24, night_multiplier)
+            if 0 <= day_start < day_end <= 24:
+                daily_multipliers_hourly[day_start:day_end] = day_multiplier
+            
+            # Tile it for the whole year
+            profile *= np.tile(daily_multipliers_hourly, 365)
+
+        # --- 3. Normalization ---
+        # Scale the final profile so its sum matches the total yearly consumption
+        total_yearly_kwh = self.config.consumption.yearly_energy_usage_kwh
+        
+        # The current profile has a certain sum. We need to scale it.
+        current_sum = profile.sum()
+        
+        # The scaling factor ensures the final sum is total_yearly_kwh
+        if current_sum > 1e-6:
+            scaling_factor = total_yearly_kwh / current_sum
+        else:
+            scaling_factor = 0 # Avoid division by zero
+            
+        final_profile_kw = profile * scaling_factor
+        
+        return final_profile_kw
     
     def _create_solar_profile(self) -> np.ndarray:
         """
@@ -108,14 +158,9 @@ class BatterySimulator:
         using pvlib, scaled to the configured yearly generation. Includes an
         optional overcast simulation for more realistic daily and seasonal variations.
 
-        The overcast simulation can be configured via the [solar] section in config.ini:
-        - overcast_enabled (bool, default: True): Enable/disable the feature.
-        - overcast_events_per_year (int, default: 150): Number of cloudy periods per year.
-        - overcast_min_duration_hours (int, default: 1): Min duration of a cloudy period.
-        - overcast_max_duration_hours (int, default: 72): Max duration of a cloudy period.
-        - overcast_min_factor (float, default: 0.1): Min solar output during overcast (e.g., 0.1 = 10% of clear sky).
-        - overcast_max_factor (float, default: 0.5): Max solar output during overcast.
-        - overcast_seasonal_variation (bool, default: True): Makes clouds more likely in winter.
+        The overcast simulation can be enabled via the [Solar] section in config.ini:
+        - overcast_enabled (bool): Enable/disable the feature.
+        The other parameters for the overcast simulation are expert-defined and not configurable.
         """
         # Location for the Netherlands (Utrecht)
         latitude = 52.09
@@ -141,16 +186,16 @@ class BatterySimulator:
         ghi = clearsky['ghi'].clip(lower=0)
 
         # --- Overcast Simulation ---
-        overcast_enabled = getattr(self.config.solar, 'overcast_enabled', True)
+        overcast_enabled = self.config.solar.overcast_enabled
         if overcast_enabled:
-            # Parameters for overcast simulation, with realistic defaults for the Netherlands.
-            # These can be overridden in config.ini under the [Solar] section.
-            num_events = int(getattr(self.config.solar, 'overcast_events_per_year', 200))
-            min_duration = int(getattr(self.config.solar, 'overcast_min_duration_hours', 2))
-            max_duration = int(getattr(self.config.solar, 'overcast_max_duration_hours', 96))
-            min_factor = float(getattr(self.config.solar, 'overcast_min_factor', 0.05))
-            max_factor = float(getattr(self.config.solar, 'overcast_max_factor', 0.6))
-            seasonal_variation = getattr(self.config.solar, 'overcast_seasonal_variation', True)
+            # Parameters for overcast simulation, with expert-defined realistic
+            # values for the Netherlands. Not user-configurable.
+            num_events = 200
+            min_duration = 2
+            max_duration = 96
+            min_factor = 0.05
+            max_factor = 0.6
+            seasonal_variation = True
 
             overcast_profile = np.ones(hours_in_year)
             

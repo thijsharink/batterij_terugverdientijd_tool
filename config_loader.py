@@ -52,6 +52,10 @@ class TariffConfig:
 class ConsumptionConfig:
     """Energy consumption configuration"""
     yearly_energy_usage_kwh: float  # Total annual energy usage in kWh
+    daily_variation_percent: float
+    seasonal_variation_percent: float
+    day_start_hour: int
+    day_end_hour: int
 
 
 @dataclass
@@ -92,8 +96,10 @@ class ConfigLoader:
         # Validate
         self._validate()
     
-    def _get_float(self, section: str, key: str) -> float:
+    def _get_float(self, section: str, key: str, fallback: Optional[float] = None) -> float:
         """Get float value from config"""
+        if fallback is not None and not self.parser.has_option(section, key):
+            return fallback
         value_str = self.parser.get(section, key)
         return float(value_str.split('#')[0].strip())
 
@@ -102,8 +108,10 @@ class ConfigLoader:
         value_str = self.parser.get(section, key)
         return value_str.split('#')[0].strip().lower() == 'true'
 
-    def _get_int(self, section: str, key: str) -> int:
+    def _get_int(self, section: str, key: str, fallback: Optional[int] = None) -> int:
         """Get int value from config"""
+        if fallback is not None and not self.parser.has_option(section, key):
+            return fallback
         value_str = self.parser.get(section, key)
         return int(float(value_str.split('#')[0].strip()))
     
@@ -160,7 +168,11 @@ class ConfigLoader:
     def _load_consumption(self) -> ConsumptionConfig:
         """Load consumption configuration"""
         return ConsumptionConfig(
-            yearly_energy_usage_kwh=self._get_float('Consumption', 'yearly_energy_usage_kwh')
+            yearly_energy_usage_kwh=self._get_float('Consumption', 'yearly_energy_usage_kwh'),
+            daily_variation_percent=self._get_float('Consumption', 'daily_variation_percent', fallback=0.0),
+            seasonal_variation_percent=self._get_float('Consumption', 'seasonal_variation_percent', fallback=0.0),
+            day_start_hour=self._get_int('Consumption', 'day_start_hour', fallback=7),
+            day_end_hour=self._get_int('Consumption', 'day_end_hour', fallback=21)
         )
     
     def _load_solar(self) -> SolarConfig:

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.widgets import Slider, TextBox, Button
 from matplotlib.ticker import FuncFormatter
+from pathlib import Path
 
 from analyzer import PaybackAnalysis, PaybackAnalyzer
 from config_loader import ConfigLoader
@@ -19,6 +20,39 @@ class GraphVisualizer:
         self.analysis = analysis
         self.analyzer = PaybackAnalyzer(config, results)
         self.df = results.to_dataframe()
+
+    def _add_logo(self, fig):
+        """Adds the logo to the top left of the figure if it exists."""
+        logo_path = Path("logo.jpg")
+        if not logo_path.exists():
+            return
+
+        try:
+            logo = plt.imread(str(logo_path))
+
+            # Use add_axes to place the logo. This is robust to figure resizing.
+            # Define the logo size in inches
+            logo_height_in = 1
+            aspect_ratio = logo.shape[1] / logo.shape[0]
+            logo_width_in = logo_height_in * aspect_ratio
+
+            # Figure size in inches
+            fig_width_in, fig_height_in = fig.get_size_inches()
+
+            # Position and size in figure coordinates (0 to 1)
+            width_frac = logo_width_in / fig_width_in
+            height_frac = logo_height_in / fig_height_in
+
+            margin_frac = 0.02  # 2% margin
+
+            left = margin_frac
+            bottom = 1.0 - height_frac - margin_frac
+
+            ax_logo = fig.add_axes([left, bottom, width_frac, height_frac], anchor='NW', zorder=10)
+            ax_logo.imshow(logo)
+            ax_logo.axis('off')
+        except Exception as e:
+            print(f"WARNING: Could not load or display logo from {logo_path}: {e}")
 
     def _format_number(self, n, pos=None):
         if n is None or not isinstance(n, (int, float)):
@@ -50,6 +84,7 @@ class GraphVisualizer:
 
         fig, axes = plt.subplots(5, 1, figsize=(14, 15))
         fig.suptitle('Multi-Year Overview', fontsize=16, fontweight='bold')
+        self._add_logo(fig)
 
         years = yearly_data['year'].values
         formatter = FuncFormatter(self._format_number)
@@ -136,6 +171,7 @@ class GraphVisualizer:
     def show_year_graph(self):
         """Single year detail (each month is one point/bar) with a year selector."""
         fig, axes = plt.subplots(3, 1, figsize=(14, 10))
+        self._add_logo(fig)
         
         ax1, ax2, ax3 = axes
         fig.subplots_adjust(top=0.85, bottom=0.1, hspace=0.25, right=0.65) # Adjusted hspace and top
@@ -259,7 +295,7 @@ class GraphVisualizer:
         update_info_texts(monthly_data)
 
         if self.config.simulation_years > 1:
-            slider_ax = fig.add_axes([0.25, 0.93, 0.5, 0.03])
+            slider_ax = fig.add_axes([0.25, 0.90, 0.5, 0.03])
             year_slider = Slider(
                 ax=slider_ax,
                 label='Year',
@@ -274,15 +310,14 @@ class GraphVisualizer:
     def show_day_graph(self):
         """Single day detail (each hour is one point) with a date picker."""
         fig, axes = plt.subplots(4, 1, figsize=(14, 12))
+        self._add_logo(fig)
         fig.subplots_adjust(top=0.85, bottom=0.1, hspace=0.25, right=0.65) # Adjusted hspace and top
 
         ax1, ax2, ax3, ax4 = axes
-        ax2_pct = ax2.twinx()
-        
+
         formatter = FuncFormatter(self._format_number)
         ax1.yaxis.set_major_formatter(formatter)
         ax2.yaxis.set_major_formatter(formatter)
-        ax2_pct.yaxis.set_major_formatter(formatter)
         ax3.yaxis.set_major_formatter(formatter)
         ax4.yaxis.set_major_formatter(formatter)
 
@@ -307,17 +342,15 @@ class GraphVisualizer:
 
         # Subplot 2: Battery State
         l2_1, = ax2.plot([], [], 'blue', marker='D', linewidth=2, label='Battery SOC (kWh)')
-        l2_2, = ax2_pct.plot([], [], 'magenta', marker='o', linewidth=2, linestyle='--', alpha=0.7,
-                           label='Battery SOC (%)')
+        l2_full, = ax2.plot([], [], 'g--', linewidth=1.5, label='Battery Full')
+        l2_empty, = ax2.plot([], [], 'r--', linewidth=1.5, label='Battery Empty')
 
-        ax2.set_ylabel('Energy (kWh)', color='blue')
-        ax2_pct.set_ylabel('State of Charge (%)', color='magenta')
+        ax2.set_ylabel('Energy (kWh)')
         ax2.set_title('Battery State of Charge')
         ax2.grid(True, alpha=0.3)
         ax2.set_xlim(-0.5, 23.5)
         ax2.set_xticks(range(0, 24, 2))
-        ax2.tick_params(axis='y', labelcolor='purple')
-        ax2_pct.tick_params(axis='y', labelcolor='magenta')
+        ax2.tick_params(axis='y', labelcolor='black')
         self._add_interactive_legend(ax2)
         plt.setp(ax2.get_xticklabels(), visible=False) # Hide x-tick labels
 
@@ -337,9 +370,10 @@ class GraphVisualizer:
 
         # Subplot 4: Energy Prices
         l4_1, = ax4.plot([], [], 'darkorange', marker=2, linewidth=2, label='Grid Buy Price (€/kWh)')
-        l4_2, = ax4.plot([], [], 'gray', linestyle='--', linewidth=2, label='Avg. Hourly Grid Buy Price for Year (€/kWh)')
-        l4_3, = ax4.plot([], [], 'orange', linestyle=':', linewidth=2, label='Raw EPEX Price (€/kWh)')
+        l4_2, = ax4.plot([], [], 'orange', linestyle='--', linewidth=2, label='Yearly Avg. Grid Buy Price (€/kWh)')
+        l4_3, = ax4.plot([], [], 'gray', linestyle='--', linewidth=2, label='Raw EPEX Price (€/kWh)')
         l4_4, = ax4.plot([], [], 'limegreen', linewidth=2, label='Grid Export Revenue (€/kWh)')
+        l4_5, = ax4.plot([], [], 'springgreen', linestyle='--', linewidth=2, label='Yearly Avg. Export Revenue (€/kWh)')
         ax4.set_xlabel('Hour of Day')
         ax4.set_ylabel('Price (€/kWh)')
         ax4.set_title('Hourly Energy Prices')
@@ -368,7 +402,7 @@ class GraphVisualizer:
             ]
 
             if daily_data.empty or prices_for_day_df.empty:
-                for line in lines1 + [l2_1, l2_2, l3_1, l3_2, l4_1, l4_2, l4_3, l4_4]:
+                for line in lines1 + [l2_1, l2_full, l2_empty, l3_1, l3_2, l4_1, l4_2, l4_3, l4_4, l4_5]:
                     line.set_data([], [])
                 fig.suptitle(f'No data for {year}-{month}-{day}', fontsize=16, fontweight='bold')
                 ax1_info.set_text('No data')
@@ -391,23 +425,25 @@ class GraphVisualizer:
             lines1[2].set_data(hours, daily_data['consumption_kw'])
             lines1[3].set_data(hours, daily_data['battery_flow_kw']) # Updated
             lines1[4].set_data(hours, daily_data['grid_flow_kw']) # Updated
-            # lines1[4] removed as there are only 4 lines now
             self._rescale_y_axis(ax1)
 
             l2_1.set_data(hours, daily_data['battery_soc_kwh'])
-            l2_2.set_data(hours, daily_data['battery_soc_percent'])
+            battery_capacity = daily_data['battery_capacity_kwh'].iloc[0] if not daily_data.empty else 0
+            l2_full.set_data([-0.5, 23.5], [battery_capacity, battery_capacity])
+            l2_empty.set_data([-0.5, 23.5], [0, 0])
             self._rescale_y_axis(ax2)
-            self._rescale_y_axis(ax2_pct)
 
             l3_1.set_data(hours, daily_data['battery_flow_cost'])
             l3_2.set_data(hours, daily_data['grid_flow_cost'])
             self._rescale_y_axis(ax3)
 
             # Update prices
-            avg_hourly_for_year = self.df[self.df['year'] == year].groupby('hour')['consumption_tariff'].mean()
+            avg_hourly_buy_for_year = self.df[self.df['year'] == year].groupby('hour')['consumption_tariff'].mean()
+            avg_hourly_export_for_year = self.df[self.df['year'] == year].groupby('hour')['export_revenue'].mean()
             l4_1.set_data(prices_for_day_df['hour'], prices_for_day_df['consumption_tariff'])
-            l4_2.set_data(avg_hourly_for_year.index, avg_hourly_for_year.values)
+            l4_2.set_data(avg_hourly_buy_for_year.index, avg_hourly_buy_for_year.values)
             l4_4.set_data(prices_for_day_df['hour'], prices_for_day_df['export_revenue'])
+            l4_5.set_data(avg_hourly_export_for_year.index, avg_hourly_export_for_year.values)
             if self.config.tariff.tariff_type == 'dynamic':
                 l4_3.set_data(prices_for_day_df['hour'], prices_for_day_df['raw_epex_price'])
             else:
@@ -442,8 +478,8 @@ class GraphVisualizer:
 
             # Update info text for ax3
             info3 = (
-                f"Total Grid Energy Cost: €{self._format_number(total_grid_energy_cost)}\n"
-                f"Total Battery Savings: €{self._format_number(total_battery_savings)}"
+                f"Grid Cost: €{self._format_number(total_grid_energy_cost)}\n"
+                f"Battery Savings: €{self._format_number(total_battery_savings)}"
             )
             ax3_info.set_text(info3)
 
@@ -473,13 +509,13 @@ class GraphVisualizer:
             except (ValueError, TypeError):
                 print(f"Invalid date format: '{text}'. Please use Y-M-D format (e.g., 3-1-15).")
 
-        text_ax = fig.add_axes([0.35, 0.93, 0.2, 0.04])
+        text_ax = fig.add_axes([0.35, 0.90, 0.2, 0.04])
         initial_text = f"{initial_year}-{initial_month:02d}-{initial_day:02d}"
         date_text_box = TextBox(text_ax, "Date (Y-M-D)", initial=initial_text)
         date_text_box.on_submit(submit_date)
         fig.date_text_box = date_text_box
 
-        button_ax = fig.add_axes([0.56, 0.93, 0.1, 0.04])
+        button_ax = fig.add_axes([0.56, 0.90, 0.1, 0.04])
         date_button = Button(button_ax, 'Update')
 
         def submit_button_on_click(event):

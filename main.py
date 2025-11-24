@@ -5,6 +5,7 @@ Main entry point for the simulation
 
 import sys
 from pathlib import Path
+import argparse # Import argparse
 
 from config_loader import ConfigLoader
 from simulator import BatterySimulator
@@ -14,6 +15,15 @@ from visualizer import GraphVisualizer
 
 def main():
     """Main execution flow"""
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Battery Payback Period Calculator")
+    parser.add_argument(
+        "--no-visualize",
+        action="store_true",
+        help="Run without displaying visualizations."
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
     print("Battery Payback Period Calculator")
     print("=" * 60)
@@ -69,16 +79,20 @@ def main():
     print(f"Expected Yearly Energy Cost (Last Year): €{analysis.last_year_grid_cost:,.2f}")
     
     # Visualize
-    print("\n[4/4] Generating visualizations...")
-    visualizer = GraphVisualizer(config, results, analysis)
-    try:
-        visualizer.show_all()
-        print("\n✓ Complete! Close graph windows to exit.")
-    except KeyboardInterrupt:
-        print("\nVisualization interrupted by user. Exiting gracefully.")
-    except Exception as e:
-        print(f"\nAn error occurred during visualization: {e}")
-        sys.exit(1)
+    if not args.no_visualize: # Conditionally run visualization
+        print("\n[4/4] Generating visualizations...")
+        visualizer = GraphVisualizer(config, results, analysis)
+        try:
+            visualizer.show_all()
+            print("\n✓ Complete! Close graph windows to exit.")
+        except KeyboardInterrupt:
+            print("\nVisualization interrupted by user. Exiting gracefully.")
+        except Exception as e:
+            print(f"\nAn error occurred during visualization: {e}")
+            sys.exit(1)
+    else:
+        print("\n[4/4] Visualizations skipped as --no-visualize flag was used.")
+        print("\n✓ Complete!")
 
 
 if __name__ == "__main__":
