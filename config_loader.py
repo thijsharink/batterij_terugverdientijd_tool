@@ -51,7 +51,9 @@ class TariffConfig:
 @dataclass
 class ConsumptionConfig:
     """Energy consumption configuration"""
-    yearly_energy_usage_kwh: float  # Total annual energy usage in kWh
+    mode: str  # 'yearly_usage' or 'csv'
+    yearly_energy_usage_kwh: Optional[float]  # Total annual energy usage in kWh
+    csv_path: Optional[Path] # Path to the consumption CSV data
     daily_variation_percent: float
     seasonal_variation_percent: float
     day_start_hour: int
@@ -61,9 +63,16 @@ class ConsumptionConfig:
 @dataclass
 class SolarConfig:
     """Solar PV configuration"""
-    yearly_generation_kwh: float  # Total kWh per year
+    mode: str  # 'yearly_usage', 'weather_api', or 'csv'
     degradation_rate: float  # % per year
-    overcast_enabled: bool # Enable/disable overcast simulation
+    
+    # Optional fields, depending on mode
+    yearly_generation_kwh: Optional[float] = None # Total kWh per year, for 'yearly_usage' and 'weather_api'
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    weather_data_file: Optional[Path] = None
+    max_export_power_kw: float = None
+    solar_csv_path: Optional[Path] = None
 
 
 @dataclass
@@ -88,6 +97,7 @@ class ConfigLoader:
         
         # Load all sections
         self.simulation_years = self._get_int('Simulation', 'years')
+        self.csv_path = Path(self._get_str('Simulation', 'csv_path'))
         self.tariff = self._load_tariff()
         self.consumption = self._load_consumption()
         self.solar = self._load_solar()
@@ -167,8 +177,24 @@ class ConfigLoader:
     
     def _load_consumption(self) -> ConsumptionConfig:
         """Load consumption configuration"""
+        mode = self._get_str('Consumption', 'mode', fallback='yearly_usage')
+        
+        yearly_kwh = None
+        if mode == 'yearly_usage':
+            if not self.parser.has_option('Consumption', 'yearly_energy_usage_kwh'):
+                raise ValueError("Config Error: Consumption mode is 'yearly_usage' but 'yearly_energy_usage_kwh' is missing.")
+            yearly_kwh = self._get_float('Consumption', 'yearly_energy_usage_kwh')
+        
+        csv_path_for_config = None
+        if mode == 'csv':
+            if not self.csv_path:
+                raise ValueError("Config Error: Consumption mode is 'csv' but 'csv_path' is missing in [Simulation] section.")
+            csv_path_for_config = self.csv_path
+
         return ConsumptionConfig(
-            yearly_energy_usage_kwh=self._get_float('Consumption', 'yearly_energy_usage_kwh'),
+            mode=mode,
+            yearly_energy_usage_kwh=yearly_kwh,
+            csv_path=csv_path_for_config,
             daily_variation_percent=self._get_float('Consumption', 'daily_variation_percent', fallback=0.0),
             seasonal_variation_percent=self._get_float('Consumption', 'seasonal_variation_percent', fallback=0.0),
             day_start_hour=self._get_int('Consumption', 'day_start_hour', fallback=7),
@@ -177,10 +203,36 @@ class ConfigLoader:
     
     def _load_solar(self) -> SolarConfig:
         """Load solar configuration"""
+        mode = self._get_str('Solar', 'mode', fallback='yearly_usage')
+        
+        yearly_kwh = None
+        if mode in ['yearly_usage', 'weather_api']:
+            if not self.parser.has_option('Solar', 'yearly_generation_kwh'):
+                raise ValueError(f"Config Error: Solar mode is '{mode}' but 'yearly_generation_kwh' is missing.")
+            yearly_kwh = self._get_float('Solar', 'yearly_generation_kwh')
+
+        solar_csv_path = None
+        if mode == 'csv':
+            if not self.parser.has_option('Simulation', 'csv_path'):
+                raise ValueError("Config Error: Solar mode is 'csv' but 'solar_csv_path' is missing.")
+            solar_csv_path_str = self._get_str('Simulation', 'csv_path')
+            solar_csv_path = Path(solar_csv_path_str)
+
+        latitude = self._get_float('Solar', 'latitude', fallback=None)
+        longitude = self._get_float('Solar', 'longitude', fallback=None)
+        weather_data_file_str = self._get_str('Solar', 'weather_data_file', fallback='weather_data.csv')
+        
+        weather_data_file = Path(weather_data_file_str) if weather_data_file_str else None
+
         return SolarConfig(
-            yearly_generation_kwh=self._get_float('Solar', 'yearly_generation_kwh'),
+            mode=mode,
+            yearly_generation_kwh=yearly_kwh,
+            solar_csv_path=solar_csv_path,
             degradation_rate=self._get_float('Solar', 'degradation_rate_percent'),
-            overcast_enabled=self._get_bool('Solar', 'overcast_enabled')
+            latitude=latitude,
+            longitude=longitude,
+            weather_data_file=weather_data_file,
+            max_export_power_kw=self._get_float('Solar', 'max_export_power_kw')
         )
     
     def _load_battery(self) -> BatteryConfig:
@@ -202,8 +254,40 @@ class ConfigLoader:
             assert self.tariff.static.day_start_hour < self.tariff.static.day_end_hour, "Day start must be before day end"
             assert 0 <= self.tariff.static.day_start_hour <= 23, "Day start hour must be 0-23"
             assert 0 <= self.tariff.static.day_end_hour <= 23, "Day end hour must be 0-23"
-        assert self.consumption.yearly_energy_usage_kwh > 0, "Yearly energy usage must be positive"
-        assert self.solar.yearly_generation_kwh > 0, "Solar generation must be positive"
+        
+        if self.consumption.mode == 'yearly_usage':
+            assert self.consumption.yearly_energy_usage_kwh is not None and self.consumption.yearly_energy_usage_kwh > 0, \
+                "Yearly energy usage must be positive when mode is 'yearly_usage'."
+        elif self.consumption.mode == 'csv':
+            assert self.consumption.csv_path is not None, \
+                "Consumption CSV path must be specified when mode is 'csv'."
+            assert self.consumption.csv_path.exists(), \
+                f"Consumption CSV file not found at {self.consumption.csv_path}."
+            assert self.consumption.csv_path.suffix == '.csv', \
+                "Consumption CSV file must have a .csv extension."
+        else:
+            raise ValueError(f"Invalid consumption mode: {self.consumption.mode}. Must be 'yearly_usage' or 'csv'.")
+        
+        valid_solar_modes = ['yearly_usage', 'weather_api', 'csv']
+        assert self.solar.mode in valid_solar_modes, \
+            f"Invalid solar mode: {self.solar.mode}. Must be one of {valid_solar_modes}"
+        
+        if self.solar.mode == 'csv':
+            assert self.solar.solar_csv_path is not None, \
+                "Solar CSV path must be specified when mode is 'csv'."
+            assert self.solar.solar_csv_path.exists(), \
+                f"Solar CSV file not found at {self.solar.solar_csv_path}."
+            assert self.solar.solar_csv_path.suffix == '.csv', \
+                "Solar CSV file must have a .csv extension."
+        else: # yearly_usage or weather_api
+            assert self.solar.yearly_generation_kwh is not None and self.solar.yearly_generation_kwh > 0, \
+                f"Yearly generation must be positive when mode is '{self.solar.mode}'."
+
+        if self.solar.mode in ['weather_api', 'csv']:
+            assert self.solar.latitude is not None, f"Latitude must be set in [Solar] config when mode is '{self.solar.mode}'."
+            assert self.solar.longitude is not None, f"Longitude must be set in [Solar] config when mode is '{self.solar.mode}'."
+            assert self.solar.weather_data_file is not None, f"weather_data_file must be set in [Solar] config when mode is '{self.solar.mode}'."
+
         assert self.battery.capacity_kwh > 0, "Battery capacity must be positive"
         assert self.battery.investment_euros > 0, "Investment must be positive"
     
@@ -225,10 +309,14 @@ class ConfigLoader:
         print(f"  Energy tax: €{self.tariff.energy_tax:.4f}/kWh")
         
         print(f"\n[Consumption]")
-        print(f"  Yearly energy usage: {self.consumption.yearly_energy_usage_kwh:,.0f} kWh")
+        print(f"  Mode: {self.consumption.mode}")
+        if self.consumption.mode == 'yearly_usage':
+            print(f"  Yearly energy usage: {self.consumption.yearly_energy_usage_kwh:,.0f} kWh")
+        elif self.consumption.mode == 'csv':
+            print(f"  Consumption data from: {self.consumption.csv_path}")
         
         print(f"\n[Solar PV]")
-        print(f"  Yearly generation: {self.solar.yearly_generation_kwh:,.0f} kWh")
+        # print(f"  Yearly generation: {self.solar.yearly_generation_kwh:,.0f} kWh")
         print(f"  Degradation: {self.solar.degradation_rate:.2f}% per year")
         
         print(f"\n[Battery]")

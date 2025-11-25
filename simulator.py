@@ -12,6 +12,7 @@ import pvlib
 
 from config_loader import ConfigLoader
 from epex_data import EpexProjector
+from weather import WeatherHandler
 
 
 @dataclass
@@ -71,6 +72,15 @@ class BatterySimulator:
         self.cycles_to_80_percent = self.config.battery.cycles_to_80_percent
         self.calendar_degradation_rate = self.config.battery.calendar_degradation_rate / 100
         self.start_timestamp = datetime(2026, 1, 1)
+
+        # Initialize weather handler if needed
+        self.weather_handler = None
+        if self.config.solar.mode in ['weather_api', 'csv']:
+            self.weather_handler = WeatherHandler(
+                latitude=self.config.solar.latitude,
+                longitude=self.config.solar.longitude,
+                file_path=self.config.solar.weather_data_file
+            )
         
         # Pre-calculate solar profile for a year
         self.solar_profile_kwh = self._create_solar_profile()
@@ -87,62 +97,183 @@ class BatterySimulator:
                 stop_date_str=self.config.tariff.dynamic.epex_stop_date
             )
     
+    def _read_consumption_from_csv(self) -> np.ndarray:
+        """
+        Reads consumption data from the specified CSV, calculates the average
+        monthly consumption across all available years, and returns a flat hourly
+        profile for a standard (non-leap) year.
+        """
+        csv_path = self.config.consumption.csv_path
+        
+        try:
+            df = pd.read_csv(csv_path)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Consumption CSV file not found at {csv_path}")
+
+        # Validate required columns
+        required_cols = ['jaar', 'maand', 'kwh consumption']
+        if not all(col in df.columns for col in required_cols):
+            raise ValueError(f"Consumption CSV at {csv_path} must contain {required_cols} columns.")
+
+        # --- Data aggregation ---
+        # 1. Calculate total consumption for each month-year pair.
+        # This handles cases where CSV might have multiple entries per month.
+        monthly_totals = df.groupby(['jaar', 'maand'])['kwh consumption'].sum().reset_index()
+
+        # 2. Calculate the average consumption for each calendar month across all years.
+        # This is the core logic change: average of Nov 2023 and Nov 2024, etc.
+        average_monthly_consumption = monthly_totals.groupby('maand')['kwh consumption'].mean()
+
+        # 3. Ensure we have data for all 12 months. If not, fill missing months
+        # with the mean of the existing months to create a complete profile.
+        average_monthly_consumption = average_monthly_consumption.reindex(range(1, 13))
+        if average_monthly_consumption.isnull().any():
+            mean_of_months = average_monthly_consumption.mean()
+            average_monthly_consumption = average_monthly_consumption.fillna(mean_of_months)
+
+        # --- Profile creation ---
+        # Create an hourly profile for a standard 365-day year.
+        # Daily and seasonal variations will be applied on top of this flat profile.
+        hours_in_year = 365 * 24
+        hourly_profile = np.zeros(hours_in_year)
+        
+        # Use a non-leap year (e.g., 2025) as a reference for days in each month.
+        ref_year_start = datetime(2025, 1, 1)
+
+        for month, monthly_kwh in average_monthly_consumption.items():
+            start_of_month = datetime(ref_year_start.year, month, 1)
+            
+            # Determine number of days and hours in the month
+            if month == 12:
+                end_of_month = datetime(ref_year_start.year + 1, 1, 1)
+            else:
+                end_of_month = datetime(ref_year_start.year, month + 1, 1)
+            
+            days_in_month = (end_of_month - start_of_month).days
+            hours_in_month = days_in_month * 24
+
+            if hours_in_month == 0:
+                continue
+
+            # Calculate flat hourly consumption for the month
+            hourly_kwh = monthly_kwh / hours_in_month
+            
+            # Determine the slice of the yearly profile array for this month
+            start_hour_idx = (start_of_month.timetuple().tm_yday - 1) * 24
+            end_hour_idx = start_hour_idx + hours_in_month
+            
+            # Fill the profile for this month
+            if end_hour_idx <= hours_in_year:
+                hourly_profile[start_hour_idx:end_hour_idx] = hourly_kwh
+        
+        return hourly_profile
+
+    def _read_solar_from_csv(self) -> pd.Series:
+        """
+        Reads solar generation data from the specified CSV, calculates the average
+        monthly generation across all available years, and returns a Series with
+        monthly kWh values.
+        """
+        csv_path = self.config.solar.solar_csv_path
+        
+        try:
+            df = pd.read_csv(csv_path)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Solar CSV file not found at {csv_path}")
+
+        # Validate required columns
+        required_cols = ['jaar', 'maand', 'kwh pv total']
+        if not all(col in df.columns for col in required_cols):
+            raise ValueError(f"Solar CSV at {csv_path} must contain {required_cols} columns.")
+
+        # 1. Calculate total generation for each month-year pair.
+        monthly_totals = df.groupby(['jaar', 'maand'])['kwh pv total'].sum().reset_index()
+
+        # 2. Calculate the average generation for each calendar month across all years.
+        average_monthly_generation = monthly_totals.groupby('maand')['kwh pv total'].mean()
+
+        # 3. Ensure we have data for all 12 months.
+        average_monthly_generation = average_monthly_generation.reindex(range(1, 13))
+        if average_monthly_generation.isnull().any():
+            mean_of_months = average_monthly_generation.mean()
+            average_monthly_generation = average_monthly_generation.fillna(mean_of_months)
+            
+        return average_monthly_generation
+    
     def _create_consumption_profile(self) -> np.ndarray:
         """
-        Creates a realistic hourly consumption profile for a typical year,
-        scaled to the configured yearly energy usage.
-
-        This profile includes:
-        - Seasonal variation (higher in summer, lower in winter).
-        - Daily variation (higher during the day, lower at night).
-
-        The variations are controlled by parameters in the [Consumption] section
-        of config.ini.
+        Creates a realistic hourly consumption profile for a typical year.
+        The profile can be based on:
+        - Configured yearly energy usage with seasonal and daily variations ('yearly_usage' mode).
+        - Historical data from a CSV file ('csv' mode), with daily variations applied.
         """
         hours_in_year = 365 * 24
         
-        # Base profile of 1s, representing the average
-        profile = np.ones(hours_in_year)
-        
-        # --- 1. Seasonal Variation ---
-        s_var = self.config.consumption.seasonal_variation_percent / 100
-        if s_var > 0:
-            # Use a cosine wave that peaks in summer (around mid-July, day ~196)
-            days = np.arange(365)
-            # cos is 1 at peak, -1 at trough. We scale it by s_var/2.
-            seasonal_multiplier = 1 + (s_var / 2) * np.cos(2 * np.pi * (days - 196) / 365)
-            profile *= np.repeat(seasonal_multiplier, 24)
+        if self.config.consumption.mode == 'csv':
+            # Load base hourly profile from CSV
+            profile = self._read_consumption_from_csv()
+            if len(profile) != hours_in_year:
+                raise ValueError(f"CSV consumption profile must have {hours_in_year} hours, but got {len(profile)}.")
+            
+            # The total yearly consumption will be derived from the CSV data
+            total_yearly_kwh = profile.sum()
 
-        # --- 2. Daily Variation ---
+        elif self.config.consumption.mode == 'yearly_usage':
+            # Base profile of 1s, representing the average
+            profile = np.ones(hours_in_year)
+            total_yearly_kwh = self.config.consumption.yearly_energy_usage_kwh
+            
+            # --- 1. Seasonal Variation ---
+            s_var = self.config.consumption.seasonal_variation_percent / 100
+            if s_var > 0:
+                # Use a cosine wave that peaks in summer (around mid-July, day ~196)
+                days = np.arange(365)
+                # cos is 1 at peak, -1 at trough. We scale it by s_var/2.
+                seasonal_multiplier = 1 + (s_var / 2) * np.cos(2 * np.pi * (days - 196) / 365)
+                profile *= np.repeat(seasonal_multiplier, 24)
+        else:
+            raise ValueError(f"Unknown consumption mode: {self.config.consumption.mode}")
+
+        # --- 2. Daily Variation (applies to both modes) ---
         d_var = self.config.consumption.daily_variation_percent / 100
         if d_var > 0:
             day_start = self.config.consumption.day_start_hour
             day_end = self.config.consumption.day_end_hour
-            day_hours = day_end - day_start
-            night_hours = 24 - day_hours
-
-            # We want day_multiplier - night_multiplier = d_var
-            # and day_hours * day_multiplier + night_hours * night_multiplier = 24
-            # Solving this gives:
-            night_multiplier = 1 - (d_var * day_hours / 24)
-            day_multiplier = 1 + (d_var * night_hours / 24)
-
-            # Create a 24h daily profile shape
-            daily_multipliers_hourly = np.full(24, night_multiplier)
-            if 0 <= day_start < day_end <= 24:
-                daily_multipliers_hourly[day_start:day_end] = day_multiplier
             
+            # Calculate the average consumption during day and night hours for scaling
+            # We want day_multiplier - night_multiplier to reflect the d_var percentage of the average hourly consumption
+            # And the total sum of the daily profile to be 24 (average hourly consumption * 24 hours)
+            
+            # Let x be the night_multiplier, y be the day_multiplier
+            # y = x * (1 + d_var)  (daily variation applies as a percentage *above* night rate)
+            # (day_end - day_start) * y + (24 - (day_end - day_start)) * x = 24 (average value for normalization)
+
+            # A simpler approach: apply variation around the *mean* hourly consumption.
+            # Define multipliers directly:
+            # Day hours get (1 + d_var/2), Night hours get (1 - d_var/2) for example, and then normalize.
+            
+            daily_multipliers_raw = np.ones(24)
+            if 0 <= day_start < day_end <= 24:
+                # Assign higher multiplier to day hours
+                daily_multipliers_raw[day_start:day_end] = 1 + d_var
+                # Assign lower multiplier to night hours
+                # If d_var is 0.1, day is 1.1, night is 0.9.
+                # Average is 1. If day hours are 8, night 16: (8*1.1 + 16*0.9) / 24 = (8.8 + 14.4) / 24 = 23.2 / 24 = 0.966. Needs normalization.
+            
+            # Normalize daily multipliers to ensure their sum is 24, so the average remains 1
+            # This ensures that applying this multiplier to a flat profile doesn't change the daily total.
+            if daily_multipliers_raw.sum() > 1e-6:
+                daily_multipliers_normalized = daily_multipliers_raw * (24 / daily_multipliers_raw.sum())
+            else:
+                daily_multipliers_normalized = np.ones(24)
+
             # Tile it for the whole year
-            profile *= np.tile(daily_multipliers_hourly, 365)
+            profile *= np.tile(daily_multipliers_normalized, 365)
 
         # --- 3. Normalization ---
         # Scale the final profile so its sum matches the total yearly consumption
-        total_yearly_kwh = self.config.consumption.yearly_energy_usage_kwh
-        
-        # The current profile has a certain sum. We need to scale it.
         current_sum = profile.sum()
         
-        # The scaling factor ensures the final sum is total_yearly_kwh
         if current_sum > 1e-6:
             scaling_factor = total_yearly_kwh / current_sum
         else:
@@ -154,109 +285,75 @@ class BatterySimulator:
     
     def _create_solar_profile(self) -> np.ndarray:
         """
-        Creates a realistic hourly solar generation profile for a typical year
-        using pvlib, scaled to the configured yearly generation. Includes an
-        optional overcast simulation for more realistic daily and seasonal variations.
-
-        The overcast simulation can be enabled via the [Solar] section in config.ini:
-        - overcast_enabled (bool): Enable/disable the feature.
-        The other parameters for the overcast simulation are expert-defined and not configurable.
+        Creates a realistic hourly solar generation profile for a typical year.
+        The profile generation method is determined by self.config.solar.mode.
         """
-        # Location for the Netherlands (Utrecht)
-        latitude = 52.09
-        longitude = 5.12
-        
-        # Create a full year of hourly timestamps for a non-leap year
+        latitude = self.config.solar.latitude
+        longitude = self.config.solar.longitude
+        mode = self.config.solar.mode
+
         times = pd.date_range(
-            start="2025-01-01",
-            end="2025-12-31 23:00",
-            freq="h",
-            tz="Europe/Amsterdam"
+            start="2025-01-01", end="2025-12-31 23:00", freq="h", tz="Europe/Amsterdam"
         )
         hours_in_year = len(times)
         
-        # Create a location object
         location = pvlib.location.Location(latitude, longitude, tz="Europe/Amsterdam")
-        
-        # Get solar position
-        solar_position = location.get_solarposition(times)
-        
-        # Use a clear-sky model to get irradiance (GHI)
         clearsky = location.get_clearsky(times)
+        
+        # Base GHI, we always start with clear-sky
         ghi = clearsky['ghi'].clip(lower=0)
 
-        # --- Overcast Simulation ---
-        overcast_enabled = self.config.solar.overcast_enabled
-        if overcast_enabled:
-            # Parameters for overcast simulation, with expert-defined realistic
-            # values for the Netherlands. Not user-configurable.
-            num_events = 200
-            min_duration = 2
-            max_duration = 96
-            min_factor = 0.05
-            max_factor = 0.6
-            seasonal_variation = True
-
-            overcast_profile = np.ones(hours_in_year)
+        # --- Apply Cloud Cover if required ---
+        # For 'weather_api' and 'csv' modes, we use weather data to shape the daily profile.
+        if mode in ['weather_api', 'csv']:
+            if not self.weather_handler:
+                raise RuntimeError(f"Weather handler not initialized for solar mode '{mode}'.")
             
-            if seasonal_variation:
-                days = np.arange(365)
-                # Cosine curve peaking in winter (around mid-Jan, day 15)
-                seasonal_p = 1.5 + np.cos(2 * np.pi * (days - 15) / 365)
-                hourly_p = np.repeat(seasonal_p, 24)
-                if len(hourly_p) != hours_in_year: # Should not happen with 365 days
-                    hourly_p = np.resize(hourly_p, hours_in_year)
-                hourly_p /= hourly_p.sum()
-            else:
-                hourly_p = None
-
-            for _ in range(num_events):
-                duration = np.random.randint(min_duration, max_duration + 1)
-                
-                max_start_hour = hours_in_year - duration
-                if max_start_hour < 0: continue
-
-                if seasonal_variation:
-                    possible_starts = np.arange(max_start_hour + 1)
-                    p_subset = hourly_p[:max_start_hour + 1]
-                    p_subset /= p_subset.sum()
-                    start_hour = np.random.choice(possible_starts, p=p_subset)
-                else:
-                    start_hour = np.random.randint(0, max_start_hour + 1)
-                
-                end_hour = start_hour + duration
-                factor = np.random.uniform(min_factor, max_factor)
-                
-                fade_duration = min(duration // 4, 12)
-                event_profile = np.full(duration, factor)
-                
-                if fade_duration > 0:
-                    fade_in = np.linspace(1.0, factor, fade_duration)
-                    fade_out = np.linspace(factor, 1.0, fade_duration)
-                    event_profile[:fade_duration] = fade_in
-                    event_profile[-fade_duration:] = fade_out
-
-                overcast_profile[start_hour:end_hour] = np.minimum(
-                    overcast_profile[start_hour:end_hour],
-                    event_profile
-                )
-
-            # Apply the overcast profile to the clear-sky generation
-            ghi = ghi * overcast_profile
-
-        # --- Renormalization to match yearly total ---
-        # The raw GHI is in W/m^2. We need to scale it to match the
-        # total configured yearly generation in kWh. The total is based on
-        # the (potentially cloudy) profile.
-        total_ghi_yearly = ghi.sum()
+            cloud_cover = self.weather_handler.get_hourly_cloud_cover().values
+            # Simple cloud model: 100% cloud cover reduces GHI by 80%
+            cloud_factor = 1.0 - (cloud_cover / 100.0) * 0.8
+            ghi *= cloud_factor
         
-        if total_ghi_yearly > 1e-6:
-            scaling_factor = self.config.solar.yearly_generation_kwh / total_ghi_yearly
-        else:
-            scaling_factor = 0
+        # --- Scale the profile based on the mode ---
+        if mode == 'csv':
+            # --- Scale month-by-month to match CSV historical averages ---
+            monthly_targets_kwh = self._read_solar_from_csv()
+            profile_kw = np.zeros(hours_in_year)
             
-        # The final profile is in kWh per hour (which is kW)
-        solar_profile_kw = ghi * scaling_factor
+            # Create a dataframe from the GHI series to easily access month
+            ghi_df = ghi.to_frame(name='ghi')
+            ghi_df['month'] = ghi_df.index.month
+
+            for month in range(1, 13):
+                target_kwh = monthly_targets_kwh.get(month, 0)
+                
+                # Get the slice of the GHI profile for the current month
+                month_slice_ghi = ghi_df[ghi_df['month'] == month]['ghi']
+                current_month_sum = month_slice_ghi.sum()
+
+                if current_month_sum > 1e-6:
+                    scaling_factor = target_kwh / current_month_sum
+                else:
+                    scaling_factor = 0
+                
+                # Apply scaling to the month's profile
+                scaled_month_profile = month_slice_ghi * scaling_factor
+                
+                # Place the scaled monthly data into the correct position in the yearly profile
+                profile_kw[ghi_df['month'] == month] = scaled_month_profile.values
+            
+            solar_profile_kw = pd.Series(profile_kw)
+
+        else: # 'yearly_usage' or 'weather_api'
+            # --- Scale the entire year to match the single 'yearly_generation_kwh' value ---
+            total_ghi_yearly = ghi.sum()
+            
+            if total_ghi_yearly > 1e-6:
+                scaling_factor = self.config.solar.yearly_generation_kwh / total_ghi_yearly
+            else:
+                scaling_factor = 0
+            
+            solar_profile_kw = ghi * scaling_factor
         
         return solar_profile_kw.values
 
@@ -371,13 +468,19 @@ class BatterySimulator:
         consumption_tariff = self._get_consumption_tariff(timestamp, year_num)
         export_revenue = self._get_export_revenue(timestamp, year_num)
         raw_epex_price = self._get_epex_price_for_timestamp(timestamp, year_num)
-        
         # Curtailment logic
         if grid_flow_kw < 0 and export_revenue < 0:
             # Paying to export, so curtail solar generation
             curtailment_kw = abs(grid_flow_kw)
             solar_generation_kw -= curtailment_kw
             grid_flow_kw = 0.0
+
+        # peak shaving logic (max power exported)
+        if grid_flow_kw < 0 and abs(grid_flow_kw) > self.config.solar.max_export_power_kw:
+            # amount of kw that we have to turn down the solar
+            peak_shave_kw = abs(grid_flow_kw) - self.config.solar.max_export_power_kw
+            solar_generation_kw -= peak_shave_kw
+            grid_flow_kw += peak_shave_kw
 
         # Calculate battery flow cost (using actual charge/discharge for clarity in this function)
         battery_flow_cost = self._calculate_battery_flow_cost(

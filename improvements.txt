@@ -1,0 +1,8 @@
+1 alle kosten nachecken, is alles exc of inc btw
+2 De hoeveelheid zonnepanelen nachecken
+
+3 programma maken dat die op basis van de weerdata de zonnepanelen simuleert zodat de weerdata tegelijk loopt met de epex prijzen. nu is het soms nog dat het niet klopt als de zon schijnt
+
+4 invoeren voor huidige situatie wegdam + nieuwe zonnepanelen. Extra panelen: 69000kwh / jaar extra
+
+5 maken dat ik 
