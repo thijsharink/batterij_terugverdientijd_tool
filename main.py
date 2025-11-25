@@ -11,6 +11,7 @@ from config_loader import ConfigLoader
 from simulator import BatterySimulator
 from analyzer import PaybackAnalyzer
 from visualizer import GraphVisualizer
+from utils import get_base_path
 
 
 def main():
@@ -28,19 +29,25 @@ def main():
     print("Battery Payback Period Calculator")
     print("=" * 60)
     
-    # Load configuration
-    config_path = Path("config.ini")
+    # Load configuration from the application's base path
+    base_path = get_base_path()
+    config_path = base_path / "config.ini"
+    
     if not config_path.exists():
         print(f"ERROR: {config_path} not found!")
+        # Add a pause so the user can see the error in the terminal when double-clicked
+        input("Press Enter to exit...")
         sys.exit(1)
     
     print("\n[1/4] Loading configuration...")
+    # Pass the absolute path to ConfigLoader
     config = ConfigLoader(config_path)
     config.print_summary()
     
     # Run simulation
     print("\n[2/4] Running hourly simulation...")
-    simulator = BatterySimulator(config)
+    # The simulator now correctly resolves paths relative to the config file
+    simulator = BatterySimulator(config, base_path)
     results = simulator.run()
     print(f"  → Simulated {len(results.hourly_data)} hours across {config.simulation_years} years")
     

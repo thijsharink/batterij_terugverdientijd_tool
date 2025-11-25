@@ -95,10 +95,20 @@ class ConfigLoader:
         self.parser = configparser.ConfigParser()
         self.parser.read(config_path)
         
+        # Get the directory of the config file to resolve relative paths
+        config_dir = self.config_path.parent
+
         # Load all sections
         self.simulation_years = self._get_int('Simulation', 'years')
         self.simulation_start_year = self._get_int('Simulation', 'simulation_start_year')
-        self.csv_path = Path(self._get_str('Simulation', 'csv_path'))
+        
+        # Read the relative path from config and resolve it immediately
+        raw_csv_path = self._get_str('Simulation', 'csv_path')
+        if raw_csv_path:
+            self.csv_path = (config_dir / raw_csv_path).resolve()
+        else:
+            self.csv_path = None
+
         self.tariff = self._load_tariff()
         self.consumption = self._load_consumption()
         self.solar = self._load_solar()
@@ -190,6 +200,7 @@ class ConfigLoader:
         if mode == 'csv':
             if not self.csv_path:
                 raise ValueError("Config Error: Consumption mode is 'csv' but 'csv_path' is missing in [Simulation] section.")
+            # self.csv_path is already an absolute path from __init__
             csv_path_for_config = self.csv_path
 
         return ConsumptionConfig(
@@ -214,16 +225,17 @@ class ConfigLoader:
 
         solar_csv_path = None
         if mode == 'csv':
-            if not self.parser.has_option('Simulation', 'csv_path'):
-                raise ValueError("Config Error: Solar mode is 'csv' but 'solar_csv_path' is missing.")
-            solar_csv_path_str = self._get_str('Simulation', 'csv_path')
-            solar_csv_path = Path(solar_csv_path_str)
-
+            if not self.csv_path:
+                raise ValueError("Config Error: Solar mode is 'csv' but 'csv_path' in [Simulation] is missing.")
+            # self.csv_path is already an absolute path from __init__
+            solar_csv_path = self.csv_path
+        
+        config_dir = self.config_path.parent
         latitude = self._get_float('Solar', 'latitude', fallback=None)
         longitude = self._get_float('Solar', 'longitude', fallback=None)
         weather_data_file_str = self._get_str('Solar', 'weather_data_file', fallback='weather_data.csv')
         
-        weather_data_file = Path(weather_data_file_str) if weather_data_file_str else None
+        weather_data_file = (config_dir / weather_data_file_str).resolve() if weather_data_file_str else None
 
         return SolarConfig(
             mode=mode,

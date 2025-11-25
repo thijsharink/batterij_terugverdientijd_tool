@@ -19,7 +19,7 @@ class EpexProjector:
     lookups during the simulation.
     """
     
-    def __init__(self, country: str, start_date_str: str, stop_date_str: str):
+    def __init__(self, country: str, start_date_str: str, stop_date_str: str, base_path: Path):
         """
         Initializes the projector by loading historical data and creating
         fast lookup tables for projected prices.
@@ -28,10 +28,12 @@ class EpexProjector:
             country (str): The country for which to load data (e.g., 'Netherlands').
             start_date_str (str): The start date of the historical data window (YYYY-MM-DD).
             stop_date_str (str): The end date of the historical data window (YYYY-MM-DD).
+            base_path (Path): The application's base path for resolving data files.
         """
         self.country = country
         self.start_date_str = start_date_str
         self.stop_date_str = stop_date_str
+        self.base_path = base_path
         
         # Load data and create lookup tables in one go
         df = self._load_and_process_data()
@@ -40,7 +42,7 @@ class EpexProjector:
             
     def _load_and_process_data(self) -> pd.DataFrame:
         """Loads, filters, and processes historical data for lookup creation."""
-        csv_path = Path(f"european_wholesale_electricity_price_data_hourly/{self.country}.csv")
+        csv_path = self.base_path / f"european_wholesale_electricity_price_data_hourly/{self.country}.csv"
         
         if not csv_path.exists():
             raise FileNotFoundError(f"EPEX data file not found at: {csv_path}")

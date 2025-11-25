@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import List
 import pandas as pd
 import pvlib
+from pathlib import Path
 
 from config_loader import ConfigLoader
 from epex_data import EpexProjector
@@ -61,8 +62,9 @@ class SimulationResults:
 class BatterySimulator:
     """Simulates battery operation over multiple years"""
     
-    def __init__(self, config: ConfigLoader):
+    def __init__(self, config: ConfigLoader, base_path: Path):
         self.config = config
+        self.base_path = base_path
         self.hourly_results: List[HourlyData] = []
         
         # Battery state
@@ -94,7 +96,8 @@ class BatterySimulator:
             self.epex_projector = EpexProjector(
                 country=self.config.tariff.dynamic.epex_country,
                 start_date_str=self.config.tariff.dynamic.epex_start_date,
-                stop_date_str=self.config.tariff.dynamic.epex_stop_date
+                stop_date_str=self.config.tariff.dynamic.epex_stop_date,
+                base_path=self.base_path
             )
     
     def _read_consumption_from_csv(self) -> np.ndarray:

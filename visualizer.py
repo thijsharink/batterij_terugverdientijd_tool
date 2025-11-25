@@ -9,6 +9,7 @@ from pathlib import Path
 from analyzer import PaybackAnalysis, PaybackAnalyzer
 from config_loader import ConfigLoader
 from simulator import SimulationResults
+from utils import resource_path
 
 
 class GraphVisualizer:
@@ -23,7 +24,7 @@ class GraphVisualizer:
 
     def _add_logo(self, fig):
         """Adds the logo to the top left of the figure if it exists."""
-        logo_path = Path("logo.jpg")
+        logo_path = resource_path("logo.jpg")
         if not logo_path.exists():
             return
 
