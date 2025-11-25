@@ -86,75 +86,106 @@ class GraphVisualizer:
         fig.suptitle('Multi-Year Overview', fontsize=16, fontweight='bold')
         self._add_logo(fig)
 
-        years = yearly_data['year'].values
+        simulation_years = yearly_data['year'].values
+        actual_years = simulation_years + self.config.simulation_start_year - 1
         formatter = FuncFormatter(self._format_number)
 
         # --- Subplot 1: Total Balance & Payback ---
         ax1 = axes[0]
-        ax1.plot(years, yearly_data['total_balance'], 'b-o', linewidth=2, label='Battery Total Balance (€)')
+        ax1.plot(actual_years, yearly_data['total_balance'], 'b-o', linewidth=2, label='Battery Total Balance (€)')
         ax1.axhline(y=0, color='r', linestyle='--', linewidth=2, label='Battery Payback Threshold (€)')
 
         if self.analysis.payback_achieved:
-            ax1.axvline(x=self.analysis.payback_year, color='g', linestyle=':', linewidth=2, label='Battery Payback Point')
+            payback_actual_year = self.analysis.payback_year + self.config.simulation_start_year - 1
+            ax1.axvline(x=payback_actual_year, color='g', linestyle=':', linewidth=2, label='Battery Payback Point')
 
         ax1.set_ylabel('Euros (€)')
         ax1.set_title('Battery Payback and Balance')
         ax1.grid(True, alpha=0.3)
-        ax1.set_xlim(0.5, years[-1] + 0.5)
+        ax1.set_xlim(actual_years[0] - 0.5, actual_years[-1] + 0.5)
         ax1.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax1)
         plt.setp(ax1.get_xticklabels(), visible=False) # Hide x-tick labels
 
+        if self.analysis.payback_achieved:
+            payback_years_str = ""
+            if self.analysis.payback_year > 0:
+                payback_years_str = f"{self.analysis.payback_year} year" + ("s" if self.analysis.payback_year > 1 else "")
+            
+            payback_months_str = ""
+            if self.analysis.payback_month > 0:
+                payback_months_str = f"{self.analysis.payback_month} month" + ("s" if self.analysis.payback_month > 1 else "")
+            
+            payback_text_parts = []
+            if payback_years_str:
+                payback_text_parts.append(payback_years_str)
+            if payback_months_str:
+                payback_text_parts.append(payback_months_str)
+            
+            payback_duration_str = ", ".join(payback_text_parts)
+
+            if payback_duration_str:
+                ax1.text(0.02, 0.98, f'Payback Period: {payback_duration_str}',
+                         transform=ax1.transAxes, fontsize=12, verticalalignment='top',
+                         bbox=dict(boxstyle='round,pad=0.5', fc='white', ec='green', lw=1, alpha=0.8))
+
+
+
         # --- Subplot 2: Energy Flows (kWh) ---
         ax2 = axes[1]
-        ax2.plot(years, yearly_data['available_solar_kwh'], 'orange', marker='o', linestyle='--', label='Available PV Generation (kWh)')
-        ax2.plot(years, yearly_data['solar_generation_kwh'], 'gold', marker='o', label='Actual PV Generation (kWh)')
-        ax2.plot(years, yearly_data['consumption_kwh'], 'red', marker='s', label='Consumption (kWh)')
-        ax2.plot(years, yearly_data['grid_import_kwh'], 'cyan', marker='x', label='Grid Import (kWh)')
-        ax2.plot(years, yearly_data['grid_export_kwh'], 'deepskyblue', marker='x', label='Grid Export (kWh)')
-        ax2.plot(years, yearly_data['battery_charge_kwh'], 'lightgreen', marker='^', label='Battery Charge (kWh)')
-        ax2.plot(years, yearly_data['battery_discharge_kwh'], 'darkgreen', marker='^', label='Battery Discharge (kWh)')
+        ax2.plot(actual_years, yearly_data['available_solar_kwh'], 'orange', marker='o', linestyle='--', label='Available PV Generation (kWh)')
+        ax2.plot(actual_years, yearly_data['solar_generation_kwh'], 'gold', marker='o', label='Actual PV Generation (kWh)')
+        ax2.plot(actual_years, yearly_data['consumption_kwh'], 'red', marker='s', label='Consumption (kWh)')
+        ax2.plot(actual_years, yearly_data['grid_import_kwh'], 'cyan', marker='x', label='Grid Import (kWh)')
+        ax2.plot(actual_years, yearly_data['grid_export_kwh'], 'deepskyblue', marker='x', label='Grid Export (kWh)')
+        ax2.plot(actual_years, yearly_data['battery_charge_kwh'], 'lightgreen', marker='^', label='Battery Charge (kWh)')
+        ax2.plot(actual_years, yearly_data['battery_discharge_kwh'], 'darkgreen', marker='^', label='Battery Discharge (kWh)')
 
         ax2.set_ylabel('Energy (kWh)')
         ax2.set_title('Annual Energy Flows')
         ax2.grid(True, alpha=0.3)
-        ax2.set_xlim(0.5, years[-1] + 0.5)
+        ax2.set_xlim(actual_years[0] - 0.5, actual_years[-1] + 0.5)
         ax2.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax2)
         plt.setp(ax2.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # --- Subplot 3: Battery Capacity Degradation ---
         ax3 = axes[2]
-        ax3.plot(years, yearly_data['battery_capacity_kwh'], 'purple', marker='D', linewidth=2, label='Battery Capacity (kWh)')
+        ax3.plot(actual_years, yearly_data['battery_capacity_kwh'], 'purple', marker='D', linewidth=2, label='Battery Capacity (kWh)')
 
         ax3.set_ylabel('Capacity (kWh)')
         ax3.set_title('Battery Degradation')
         ax3.grid(True, alpha=0.3)
-        ax3.set_xlim(0.5, years[-1] + 0.5)
+        ax3.set_xlim(actual_years[0] - 0.5, actual_years[-1] + 0.5)
         ax3.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax3)
         plt.setp(ax3.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # --- Subplot 4: Expected Energy Cost ---
         ax4 = axes[3]
-        ax4.plot(years, yearly_data['grid_flow_cost'], 'm-s', linewidth=2, label='Expected Energy Cost (€)')
+        ax4.plot(actual_years, yearly_data['grid_flow_cost'], 'm-s', linewidth=2, label='Expected Energy Cost (€)')
         ax4.set_ylabel('Euros (€)')
         ax4.set_title('Annual Grid Energy Cost')
         ax4.grid(True, alpha=0.3)
-        ax4.set_xlim(0.5, years[-1] + 0.5)
+        ax4.set_xlim(actual_years[0] - 0.5, actual_years[-1] + 0.5)
         ax4.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax4)
         plt.setp(ax4.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # --- Subplot 5: Average Energy Price ---
         ax5 = axes[4]
-        avg_yearly_price = self.df.groupby('year')['consumption_tariff'].mean()
+        # Group by actual year for display, but original DataFrame `self.df` still has `year` as simulation year
+        # For this plot, `self.df['year']` should be mapped to actual years for grouping correctly.
+        df_with_actual_year = self.df.copy()
+        df_with_actual_year['actual_year'] = df_with_actual_year['year'] + self.config.simulation_start_year - 1
+        avg_yearly_price = df_with_actual_year.groupby('actual_year')['consumption_tariff'].mean()
+        
         ax5.plot(avg_yearly_price.index, avg_yearly_price.values, 'teal', marker='p', linewidth=2, label='Avg. Grid Buy Price (€/kWh)')
         ax5.set_xlabel('Year')
         ax5.set_ylabel('Price (€/kWh)')
         ax5.set_title('Average Annual Grid Buy Price')
         ax5.grid(True, alpha=0.3)
-        ax5.set_xlim(0.5, years[-1] + 0.5)
+        ax5.set_xlim(actual_years[0] - 0.5, actual_years[-1] + 0.5)
         ax5.yaxis.set_major_formatter(formatter)
         self._add_interactive_legend(ax5)
 
@@ -183,8 +214,9 @@ class GraphVisualizer:
         month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-        initial_year = 1
-        monthly_data = self.analyzer.get_monthly_data(initial_year)
+        initial_actual_year_for_year_graph = self.config.simulation_start_year
+        initial_simulation_year_for_year_graph = 1 # Corresponds to initial_actual_year_for_year_graph
+        monthly_data = self.analyzer.get_monthly_data(initial_simulation_year_for_year_graph)
         months = monthly_data['month'].values
 
         # Subplot 1: Monthly Savings
@@ -215,7 +247,7 @@ class GraphVisualizer:
         plt.setp(ax2.get_xticklabels(), visible=False) # Hide x-tick labels
 
         # Subplot 3: Average Energy Price (formerly Subplot 4)
-        initial_monthly_prices = self.df[self.df['year'] == initial_year].groupby('month')['consumption_tariff'].mean()
+        initial_monthly_prices = self.df[self.df['year'] == initial_simulation_year_for_year_graph].groupby('month')['consumption_tariff'].mean()
         l3_1, = ax3.plot(initial_monthly_prices.index, initial_monthly_prices.values, 'teal', marker='p', linewidth=2, label='Avg. Grid Buy Price (€/kWh)')
         ax3.set_xlabel('Month')
         ax3.set_ylabel('Price (€/kWh)')
@@ -225,7 +257,7 @@ class GraphVisualizer:
         ax3.grid(True, alpha=0.3)
         self._add_interactive_legend(ax3)
 
-        fig.suptitle(f'Year {initial_year} - Monthly Detail', fontsize=16, fontweight='bold')
+        fig.suptitle(f'Year {initial_actual_year_for_year_graph} - Monthly Detail', fontsize=16, fontweight='bold')
 
         # Info text boxes
         ax1_info = self._create_info_box(fig, [0.86, 0.75, 0.13, 0.15], color='lightyellow')
@@ -260,12 +292,12 @@ class GraphVisualizer:
             )
             ax2_info.set_text(info2_text)
 
-        def update(year):
-            year = int(year)
-            monthly_data = self.analyzer.get_monthly_data(year)
-            monthly_prices = self.df[self.df['year'] == year].groupby('month')['consumption_tariff'].mean()
+        def update(actual_year_from_slider):
+            simulation_year = int(actual_year_from_slider) - self.config.simulation_start_year + 1
+            monthly_data = self.analyzer.get_monthly_data(simulation_year)
+            monthly_prices = self.df[self.df['year'] == simulation_year].groupby('month')['consumption_tariff'].mean()
 
-            fig.suptitle(f'Year {year} - Monthly Detail', fontsize=16, fontweight='bold')
+            fig.suptitle(f'Year {actual_year_from_slider} - Monthly Detail', fontsize=16, fontweight='bold')
 
             bar_container = ax1.containers[0]
             for i, rect in enumerate(bar_container):
@@ -299,9 +331,9 @@ class GraphVisualizer:
             year_slider = Slider(
                 ax=slider_ax,
                 label='Year',
-                valmin=1,
-                valmax=self.config.simulation_years,
-                valinit=initial_year,
+                valmin=self.config.simulation_start_year,
+                valmax=self.config.simulation_start_year + self.config.simulation_years - 1,
+                valinit=initial_actual_year_for_year_graph,
                 valstep=1
             )
             year_slider.on_changed(update)
@@ -321,7 +353,8 @@ class GraphVisualizer:
         ax3.yaxis.set_major_formatter(formatter)
         ax4.yaxis.set_major_formatter(formatter)
 
-        initial_year, initial_month, initial_day = 1, 6, 15
+        initial_actual_year = self.config.simulation_start_year
+        initial_month, initial_day = 6, 15
 
         # Subplot 1: Power Flows
         l1_1, = ax1.plot([], [], 'orange', linestyle='--', marker='o', linewidth=2, label='Available PV (kW)')
@@ -393,10 +426,11 @@ class GraphVisualizer:
         ax3_info = info_text_ax3.text(0, 0.5, '', va='center', fontsize=10,
                                       bbox=dict(boxstyle="round,pad=0.5", fc="lightyellow", ec="black", lw=1))
 
-        def update(year, month, day):
-            daily_data = self.analyzer.get_daily_data(year, month, day)
+        def update(actual_year, month, day):
+            simulation_year = actual_year - self.config.simulation_start_year + 1
+            daily_data = self.analyzer.get_daily_data(simulation_year, month, day)
             prices_for_day_df = self.df[
-                (self.df['year'] == year) &
+                (self.df['year'] == simulation_year) &
                 (self.df['month'] == month) &
                 (self.df['day'] == day)
             ]
@@ -404,7 +438,7 @@ class GraphVisualizer:
             if daily_data.empty or prices_for_day_df.empty:
                 for line in lines1 + [l2_1, l2_full, l2_empty, l3_1, l3_2, l4_1, l4_2, l4_3, l4_4, l4_5]:
                     line.set_data([], [])
-                fig.suptitle(f'No data for {year}-{month}-{day}', fontsize=16, fontweight='bold')
+                fig.suptitle(f'No data for {actual_year}-{month}-{day}', fontsize=16, fontweight='bold')
                 ax1_info.set_text('No data')
                 ax3_info.set_text('No data')
                 fig.canvas.draw_idle()
@@ -414,11 +448,11 @@ class GraphVisualizer:
             # grid_interaction removed, directly use daily_data['grid_flow_kw']
 
             try:
-                date_obj = datetime(2024, month, day)
+                date_obj = datetime(actual_year, month, day)
                 date_str = date_obj.strftime('%-d %B')
             except ValueError:
                 date_str = f"{day}/{month}"
-            fig.suptitle(f'Day View: {date_str}, Year {year}', fontsize=16, fontweight='bold')
+            fig.suptitle(f'Day View: {date_str}, Year {actual_year}', fontsize=16, fontweight='bold')
 
             lines1[0].set_data(hours, daily_data['available_solar_kw'])
             lines1[1].set_data(hours, daily_data['solar_generation_kw'])
@@ -438,8 +472,8 @@ class GraphVisualizer:
             self._rescale_y_axis(ax3)
 
             # Update prices
-            avg_hourly_buy_for_year = self.df[self.df['year'] == year].groupby('hour')['consumption_tariff'].mean()
-            avg_hourly_export_for_year = self.df[self.df['year'] == year].groupby('hour')['export_revenue'].mean()
+            avg_hourly_buy_for_year = self.df[self.df['year'] == simulation_year].groupby('hour')['consumption_tariff'].mean()
+            avg_hourly_export_for_year = self.df[self.df['year'] == simulation_year].groupby('hour')['export_revenue'].mean()
             l4_1.set_data(prices_for_day_df['hour'], prices_for_day_df['consumption_tariff'])
             l4_2.set_data(avg_hourly_buy_for_year.index, avg_hourly_buy_for_year.values)
             l4_4.set_data(prices_for_day_df['hour'], prices_for_day_df['export_revenue'])
@@ -491,10 +525,11 @@ class GraphVisualizer:
                 if len(parts) != 3:
                     raise ValueError("Date must be in Y-M-D format")
 
-                year, month, day = [int(p) for p in parts]
+                actual_year, month, day = [int(p) for p in parts]
+                simulation_year = actual_year - self.config.simulation_start_year + 1
 
-                if not (1 <= year <= self.config.simulation_years):
-                    print(f"Year must be between 1 and {self.config.simulation_years}")
+                if not (1 <= simulation_year <= self.config.simulation_years):
+                    print(f"Year must be between {self.config.simulation_start_year} and {self.config.simulation_start_year + self.config.simulation_years - 1}")
                     return
 
                 # Basic validation for month and day
@@ -505,12 +540,12 @@ class GraphVisualizer:
                     print(f"Invalid day: {day}. Must be between 1 and 31.")
                     return
 
-                update(year, month, day)
+                update(actual_year, month, day)
             except (ValueError, TypeError):
                 print(f"Invalid date format: '{text}'. Please use Y-M-D format (e.g., 3-1-15).")
 
         text_ax = fig.add_axes([0.35, 0.90, 0.2, 0.04])
-        initial_text = f"{initial_year}-{initial_month:02d}-{initial_day:02d}"
+        initial_text = f"{initial_actual_year}-{initial_month:02d}-{initial_day:02d}"
         date_text_box = TextBox(text_ax, "Date (Y-M-D)", initial=initial_text)
         date_text_box.on_submit(submit_date)
         fig.date_text_box = date_text_box
@@ -524,7 +559,7 @@ class GraphVisualizer:
         date_button.on_clicked(submit_button_on_click)
         fig.date_button = date_button
 
-        update(initial_year, initial_month, initial_day)
+        update(initial_actual_year, initial_month, initial_day)
 
     def _add_interactive_legend(self, ax):
         """

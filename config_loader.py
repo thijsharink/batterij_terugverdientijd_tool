@@ -97,6 +97,7 @@ class ConfigLoader:
         
         # Load all sections
         self.simulation_years = self._get_int('Simulation', 'years')
+        self.simulation_start_year = self._get_int('Simulation', 'simulation_start_year')
         self.csv_path = Path(self._get_str('Simulation', 'csv_path'))
         self.tariff = self._load_tariff()
         self.consumption = self._load_consumption()

@@ -71,7 +71,7 @@ class BatterySimulator:
         self.initial_battery_capacity_kwh = self.config.battery.capacity_kwh
         self.cycles_to_80_percent = self.config.battery.cycles_to_80_percent
         self.calendar_degradation_rate = self.config.battery.calendar_degradation_rate / 100
-        self.start_timestamp = datetime(2026, 1, 1)
+        self.start_timestamp = datetime(self.config.simulation_start_year, 1, 1)
 
         # Initialize weather handler if needed
         self.weather_handler = None
@@ -137,8 +137,8 @@ class BatterySimulator:
         hours_in_year = 365 * 24
         hourly_profile = np.zeros(hours_in_year)
         
-        # Use a non-leap year (e.g., 2025) as a reference for days in each month.
-        ref_year_start = datetime(2025, 1, 1)
+        # Use the simulation start year as a reference for days in each month.
+        ref_year_start = datetime(self.config.simulation_start_year, 1, 1)
 
         for month, monthly_kwh in average_monthly_consumption.items():
             start_of_month = datetime(ref_year_start.year, month, 1)
@@ -293,7 +293,7 @@ class BatterySimulator:
         mode = self.config.solar.mode
 
         times = pd.date_range(
-            start="2025-01-01", end="2025-12-31 23:00", freq="h", tz="Europe/Amsterdam"
+            start=f"{self.config.simulation_start_year}-01-01", end=f"{self.config.simulation_start_year}-12-31 23:00", freq="h", tz="Europe/Amsterdam"
         )
         hours_in_year = len(times)
         
@@ -359,7 +359,7 @@ class BatterySimulator:
 
     def run(self) -> SimulationResults:
         """Run complete simulation"""
-        start_date = datetime(2026, 1, 1)
+        start_date = datetime(self.config.simulation_start_year, 1, 1)
         end_date = start_date.replace(year=start_date.year + self.config.simulation_years)
         total_hours = int((end_date - start_date).total_seconds() / 3600)
 
