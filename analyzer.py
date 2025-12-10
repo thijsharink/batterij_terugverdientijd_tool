@@ -73,9 +73,6 @@ class PaybackAnalyzer:
         
         # Round-trip efficiency (energy out / energy in)
         battery_eff = (total_discharged / total_charged * 100) if total_charged > 0 else 0
-        
-        # Round-trip efficiency (energy out / energy in)
-        battery_eff = (total_discharged / total_charged * 100) if total_charged > 0 else 0
 
         # Calculate new metrics
         total_project_cost = self.df['grid_flow_cost'].sum() + investment

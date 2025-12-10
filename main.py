@@ -4,8 +4,22 @@ Main entry point for the simulation
 """
 
 import sys
+import os
 from pathlib import Path
 import argparse # Import argparse
+
+# --- Matplotlib Cache Patch ---
+# When running as a PyInstaller bundle, matplotlib rebuilds its font cache
+# on every run because it's extracted to a new temp directory.
+# To prevent this, we set MPLCONFIGDIR to a persistent location next to the executable.
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # The executable's directory
+    executable_dir = Path(sys.executable).parent
+    # A persistent cache directory
+    mpl_cache_dir = executable_dir / 'mpl_cache'
+    os.makedirs(mpl_cache_dir, exist_ok=True)
+    os.environ['MPLCONFIGDIR'] = str(mpl_cache_dir)
+# --- End of Patch ---
 
 from config_loader import ConfigLoader
 from simulator import BatterySimulator
@@ -65,7 +79,7 @@ def main():
     
     if analysis.payback_year:
         print(f"\n✓ PAYBACK ACHIEVED!")
-        print(f"  → Payback Year: {analysis.payback_year}")
+        print(f"  → Payback Year: {analysis.payback_year-1}")
         print(f"  → Payback Month: {analysis.payback_month}")
         print(f"  → Total months: {(analysis.payback_year - 1) * 12 + analysis.payback_month}")
     else:
@@ -82,8 +96,7 @@ def main():
     print(f"Total Battery Charged: {analysis.total_battery_charged:,.0f} kWh")
     print(f"Total Battery Discharged: {analysis.total_battery_discharged:,.0f} kWh")
     print(f"Battery Round-trip Efficiency: {analysis.battery_efficiency:.1f}%")
-    print(f"\nTotal Project Cost (incl. investment): €{analysis.total_project_cost:,.2f}")
-    print(f"Expected Yearly Energy Cost (Last Year): €{analysis.last_year_grid_cost:,.2f}")
+    print(f"\nTotal Energy Cost (incl. investment): €{analysis.total_project_cost:,.2f}")
     
     # Visualize
     if not args.no_visualize: # Conditionally run visualization

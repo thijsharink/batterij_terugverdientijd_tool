@@ -59,6 +59,8 @@ class SimulationResults:
         return pd.DataFrame([vars(h) for h in self.hourly_data])
 
 
+# In simulator.py: Update BatterySimulator __init__ to pass dynamic tariff's EPEX period to WeatherHandler when applicable. This ensures solar distribution uses weather data from the same period as EPEX for better correlation between solar generation and market prices.
+
 class BatterySimulator:
     """Simulates battery operation over multiple years"""
     
@@ -75,13 +77,21 @@ class BatterySimulator:
         self.calendar_degradation_rate = self.config.battery.calendar_degradation_rate / 100
         self.start_timestamp = datetime(self.config.simulation_start_year, 1, 1)
 
-        # Initialize weather handler if needed
+        # Initialize weather handler if needed, using EPEX period for dynamic tariffs to correlate with prices
         self.weather_handler = None
         if self.config.solar.mode in ['weather_api', 'csv']:
+            if self.config.tariff.tariff_type == 'dynamic':
+                start_date = self.config.tariff.dynamic.epex_start_date
+                end_date = self.config.tariff.dynamic.epex_stop_date
+            else:
+                start_date = "2023-01-01"
+                end_date = "2023-12-31"
             self.weather_handler = WeatherHandler(
                 latitude=self.config.solar.latitude,
                 longitude=self.config.solar.longitude,
-                file_path=self.config.solar.weather_data_file
+                file_path=self.config.solar.weather_data_file,
+                start_date=start_date,
+                end_date=end_date
             )
         
         # Pre-calculate solar profile for a year
@@ -99,7 +109,7 @@ class BatterySimulator:
                 stop_date_str=self.config.tariff.dynamic.epex_stop_date,
                 base_path=self.base_path
             )
-    
+
     def _read_consumption_from_csv(self) -> np.ndarray:
         """
         Reads consumption data from the specified CSV, calculates the average

@@ -329,7 +329,9 @@ class ConfigLoader:
             print(f"  Consumption data from: {self.consumption.csv_path}")
         
         print(f"\n[Solar PV]")
-        # print(f"  Yearly generation: {self.solar.yearly_generation_kwh:,.0f} kWh")
+        print(f"  Mode: {self.solar.mode}")
+        if self.solar.yearly_generation_kwh is not None:
+            print(f"  Yearly generation: {self.solar.yearly_generation_kwh:,.0f} kWh")
         print(f"  Degradation: {self.solar.degradation_rate:.2f}% per year")
         
         print(f"\n[Battery]")

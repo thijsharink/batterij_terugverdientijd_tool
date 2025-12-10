@@ -109,21 +109,30 @@ class GraphVisualizer:
         plt.setp(ax1.get_xticklabels(), visible=False) # Hide x-tick labels
 
         if self.analysis.payback_achieved:
+            # Correctly calculate duration from total months
+            total_months = (self.analysis.payback_year - 1) * 12 + self.analysis.payback_month
+            payback_years_duration = total_months // 12
+            payback_months_duration = total_months % 12
+
             payback_years_str = ""
-            if self.analysis.payback_year > 0:
-                payback_years_str = f"{self.analysis.payback_year} year" + ("s" if self.analysis.payback_year > 1 else "")
-            
+            if payback_years_duration > 0:
+                payback_years_str = f"{payback_years_duration} year" + ("s" if payback_years_duration > 1 else "")
+
             payback_months_str = ""
-            if self.analysis.payback_month > 0:
-                payback_months_str = f"{self.analysis.payback_month} month" + ("s" if self.analysis.payback_month > 1 else "")
+            if payback_months_duration > 0:
+                payback_months_str = f"{payback_months_duration} month" + ("s" if payback_months_duration > 1 else "")
             
             payback_text_parts = []
             if payback_years_str:
                 payback_text_parts.append(payback_years_str)
             if payback_months_str:
                 payback_text_parts.append(payback_months_str)
-            
-            payback_duration_str = ", ".join(payback_text_parts)
+
+            # Handle cases where payback is very fast
+            if not payback_text_parts:
+                payback_duration_str = "within the first few months"
+            else:
+                payback_duration_str = ", ".join(payback_text_parts)
 
             if payback_duration_str:
                 ax1.text(0.02, 0.98, f'Payback Period: {payback_duration_str}',
