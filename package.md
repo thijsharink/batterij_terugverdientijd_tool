@@ -44,7 +44,7 @@ The `--add-data` separator is platform-specific: use a semicolon (`;`) on Window
 
 **On Windows:**
 ```bash
-pyinstaller --name BatterijTerugverdientijdTool --onefile --add-data "logo.jpg;." --add-data "PASTE_PVLIB_DATA_PATH_HERE;pvlib/data" main.py
+pyinstaller --name BatterijTerugverdientijdTool --onefile --add-data "logo.jpg;." --add-data "venv\Lib\site-packages\pvlib\data;pvlib/data" main.py
 ```
 
 **On macOS / Linux:**

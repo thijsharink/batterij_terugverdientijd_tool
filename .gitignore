@@ -220,3 +220,7 @@ __marimo__/
 *.zip
 
 batterij_tool/BatterijTerugverdientijdTool
+batterij_tool/BatterijTerugverdientijdTool.exe
+
+batterij_tool/weather_data.csv
+batterij_tool/mpl_cache
